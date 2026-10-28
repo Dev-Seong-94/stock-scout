@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Generated market data (rebuilt by scripts/build_snapshot.py)
+backend/data/*
+!backend/data/fomc.json
+!backend/data/.gitkeep
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# OS
+.DS_Store
