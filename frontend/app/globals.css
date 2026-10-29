@@ -10,6 +10,7 @@
   --bg: #eef1f4;
   --panel: #ffffff;
   --panel-2: #f6f8fa;
+  --row-hover: #e2e7ed;
   --ink: #17212b;
   --muted: #5b6876;
   --faint: #8a96a3;
@@ -37,6 +38,7 @@
     --bg: #11161c;
     --panel: #19212a;
     --panel-2: #1f2832;
+    --row-hover: #2c3844;
     --ink: #e4e9ee;
     --muted: #9aa7b4;
     --faint: #6f7c89;
@@ -456,8 +458,17 @@ textarea {
   text-align: left;
 }
 
-.table tbody tr:hover {
-  background: var(--panel-2);
+.table tbody tr:hover,
+.table tbody tr:hover td.is-filtered {
+  background: var(--row-hover);
+}
+
+.table tbody tr.row-link {
+  cursor: pointer;
+}
+
+.table tbody tr.row-link:hover .ticker {
+  color: var(--accent);
 }
 
 .sort-btn {

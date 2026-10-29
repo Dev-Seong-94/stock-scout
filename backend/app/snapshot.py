@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 
 SNAPSHOT = settings.data_dir / "snapshot.parquet"
 META = settings.data_dir / "snapshot_meta.json"
+PARTIAL = settings.data_dir / "snapshot.partial.parquet"
+PARTIAL_META = settings.data_dir / "snapshot.partial.json"
 
 
 def _pct(value) -> float | None:
@@ -122,17 +124,38 @@ def _download_histories(symbols: list[str], chunk: int = 100) -> dict[str, pd.Da
     out: dict[str, pd.DataFrame] = {}
     for i in range(0, len(symbols), chunk):
         part = symbols[i : i + chunk]
-        df = yf.download(part, period="2y", auto_adjust=True, progress=False, group_by="ticker", threads=True)
+        try:
+            # threads=False: parallel downloads open many sockets at once and get rate limited.
+            df = yf.download(part, period="2y", auto_adjust=True, progress=False, group_by="ticker", threads=False)
+        except Exception as exc:
+            log.warning("bulk price download failed for %s…: %s", part[0], exc)
+            continue
+        if df is None or df.empty:
+            continue
         for sym in part:
             try:
-                sub = df[sym] if isinstance(df.columns, pd.MultiIndex) else df
+                if isinstance(df.columns, pd.MultiIndex):
+                    level = 0 if sym in df.columns.get_level_values(0) else 1
+                    sub = df.xs(sym, axis=1, level=level)
+                else:
+                    sub = df
                 sub = sub.dropna(how="all")
-                if not sub.empty:
+                if "Close" in sub and sub["Close"].notna().sum() > 0:
                     sub.index = pd.to_datetime(sub.index).tz_localize(None)
                     out[sym] = sub
             except KeyError:
                 continue
+        time.sleep(1)
     return out
+
+
+def _single_history(ticker) -> pd.DataFrame:
+    """Fallback when a ticker was missing from the bulk download."""
+    df = ticker.history(period="2y", auto_adjust=True)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    return df
 
 
 def _with_retry(fn: Callable, *args, attempts: int = 3):
@@ -146,26 +169,78 @@ def _with_retry(fn: Callable, *args, attempts: int = 3):
     return None
 
 
+def _raise_open_file_limit(target: int = 8192) -> None:
+    """macOS allows only 256 open files per process by default. yfinance opens
+    sockets and cache files for every ticker, so a 500-ticker run can hit
+    "[Errno 24] Too many open files". Raise the soft limit for this process."""
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        wanted = min(target, hard) if hard != resource.RLIM_INFINITY else target
+        if soft < wanted:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
+    except (ImportError, ValueError, OSError) as exc:  # Windows has no resource module
+        log.info("could not raise open file limit: %s", exc)
+
+
+def _save_partial(rows: list[dict], failed: list[str]) -> None:
+    pd.DataFrame(rows).to_parquet(PARTIAL, index=False)
+    PARTIAL_META.write_text(json.dumps({"failed": failed}))
+
+
+def _load_partial(max_age_hours: float = 20) -> tuple[list[dict], list[str]]:
+    """Rows saved by an interrupted run today, so it can continue where it stopped."""
+    if not PARTIAL.exists() or time.time() - PARTIAL.stat().st_mtime > max_age_hours * 3600:
+        return [], []
+    try:
+        rows = pd.read_parquet(PARTIAL).to_dict(orient="records")
+        failed = json.loads(PARTIAL_META.read_text()).get("failed", []) if PARTIAL_META.exists() else []
+        return rows, failed
+    except Exception:
+        return [], []
+
+
 def build_snapshot(
     symbols: list[str],
     include_statements: bool = True,
     pause: float = 0.3,
     progress: Callable[[int, int, str], None] | None = None,
+    checkpoint_every: int = 25,
+    resume: bool = True,
 ) -> pd.DataFrame:
+    _raise_open_file_limit()
+    import pyarrow.parquet  # noqa: F401  load the writer up front, not after hundreds of requests
     import yfinance as yf
 
-    histories = _download_histories(symbols)
-    rows, failed = [], []
-    for n, sym in enumerate(symbols, start=1):
+    rows, failed = _load_partial() if resume else ([], [])
+    done = {r["symbol"] for r in rows} | set(failed)
+    if done:
+        log.info("resuming: %d tickers already done", len(done))
+    todo = [s for s in symbols if s not in done]
+
+    histories = _download_histories(todo) if todo else {}
+    log.info("bulk prices: %d of %d tickers", len(histories), len(todo))
+    no_prices: list[str] = []
+    for n, sym in enumerate(todo, start=1):
         t = yf.Ticker(sym)
         info = _with_retry(lambda s=t: s.info or {}) or {}
         income = _with_retry(lambda s=t: s.income_stmt) if include_statements else None
-        if not info and sym not in histories:
+        hist = histories.get(sym)
+        if hist is None:
+            hist = _with_retry(lambda s=t: _single_history(s))
+            if hist is None or hist.empty:
+                no_prices.append(sym)
+                hist = pd.DataFrame()
+        if not info and hist.empty:
             failed.append(sym)
         else:
-            rows.append(build_row(sym, histories.get(sym, pd.DataFrame()), info, income))
+            rows.append(build_row(sym, hist, info, income))
+        del t
         if progress:
-            progress(n, len(symbols), sym)
+            progress(len(done) + n, len(symbols), sym)
+        if n % checkpoint_every == 0:
+            _save_partial(rows, failed)
         time.sleep(pause)
 
     df = pd.DataFrame(rows)
@@ -176,12 +251,15 @@ def build_snapshot(
                 "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "count": len(df),
                 "failed": failed,
+                "no_prices": no_prices,
                 "statements": include_statements,
             },
             ensure_ascii=False,
             indent=2,
         )
     )
+    PARTIAL.unlink(missing_ok=True)
+    PARTIAL_META.unlink(missing_ok=True)
     return df
 
 

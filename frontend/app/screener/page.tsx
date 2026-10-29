@@ -478,7 +478,17 @@ function Screener() {
               </thead>
               <tbody>
                 {result?.rows.map((r) => (
-                  <tr key={r.symbol}>
+                  <tr
+                    key={r.symbol}
+                    className="row-link"
+                    onClick={(e) => {
+                      // Let real links, buttons and text selection behave normally.
+                      if ((e.target as HTMLElement).closest("a, button") || window.getSelection()?.toString()) return;
+                      const href = `/stocks/${r.symbol}`;
+                      if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
+                      else router.push(href);
+                    }}
+                  >
                     <td>
                       <Link className="ticker" href={`/stocks/${r.symbol}`}>
                         {r.symbol}
