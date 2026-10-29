@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 
 import feedparser
@@ -14,12 +16,13 @@ log = logging.getLogger(__name__)
 
 GDELT = "https://api.gdeltproject.org/api/v2/doc/doc"
 
-# Topics for the geopolitics tab. Edit freely; queries use GDELT syntax.
+# Topics for the geopolitics tab. Edit freely; queries use GDELT syntax
+# (parentheses are only allowed around OR'd terms).
 GEO_TOPICS = [
     {"key": "trade", "label": "무역·관세", "query": '(tariff OR tariffs OR "trade war" OR "export controls")'},
-    {"key": "us-china", "label": "미중 관계", "query": '("United States" China) (tension OR talks OR sanctions OR chips)'},
+    {"key": "us-china", "label": "미중 관계", "query": '"United States" China (tension OR talks OR sanctions OR chips)'},
     {"key": "middle-east", "label": "중동", "query": "(Israel OR Iran OR Gaza OR \"Red Sea\" OR Houthi)"},
-    {"key": "russia-ukraine", "label": "러시아·우크라이나", "query": "(Russia Ukraine) (war OR ceasefire OR sanctions)"},
+    {"key": "russia-ukraine", "label": "러시아·우크라이나", "query": "Russia Ukraine (war OR ceasefire OR sanctions)"},
     {"key": "energy", "label": "에너지·원자재", "query": "(OPEC OR \"oil supply\" OR \"natural gas\" OR \"crude oil\")"},
     {"key": "central-banks", "label": "중앙은행", "query": '("Federal Reserve" OR "rate cut" OR "rate hike" OR ECB OR "Bank of Japan")'},
 ]
@@ -41,8 +44,31 @@ def _gdelt_date(value: str | None) -> str | None:
         return value
 
 
+class GdeltUnavailable(RuntimeError):
+    pass
+
+
+# GDELT allows one request every 5 seconds per client; space calls out.
+_GDELT_INTERVAL = 5.5
+_gdelt_lock = threading.Lock()
+_gdelt_last = 0.0
+
+
+def _gdelt_get(params: dict) -> httpx.Response:
+    global _gdelt_last
+    with _gdelt_lock:
+        wait = _gdelt_last + _GDELT_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            return httpx.get(GDELT, params=params, timeout=20)
+        finally:
+            _gdelt_last = time.monotonic()
+
+
 @ttl_cache(seconds=30 * 60)
 def gdelt(query: str, timespan: str = "7d", limit: int = 25) -> list[dict]:
+    """Raises GdeltUnavailable on failure so the empty result is not cached."""
     params = {
         "query": f"{query} sourcelang:english",
         "mode": "ArtList",
@@ -52,12 +78,17 @@ def gdelt(query: str, timespan: str = "7d", limit: int = 25) -> list[dict]:
         "sort": "DateDesc",
     }
     try:
-        r = httpx.get(GDELT, params=params, timeout=20)
+        r = _gdelt_get(params)
+        if r.status_code == 429:
+            r = _gdelt_get(params)
         r.raise_for_status()
+        if "json" not in r.headers.get("content-type", ""):
+            # Query errors come back as 200 + a plain-text message.
+            raise ValueError(r.text[:200])
         articles = r.json().get("articles", [])
     except Exception as exc:  # GDELT sometimes answers with HTML or rate limits
         log.warning("GDELT failed for %r: %s", query, exc)
-        return []
+        raise GdeltUnavailable("GDELT가 잠시 응답하지 않아요. 조금 뒤에 다시 시도해 주세요.") from exc
     seen, out = set(), []
     for a in articles:
         title = (a.get("title") or "").strip()

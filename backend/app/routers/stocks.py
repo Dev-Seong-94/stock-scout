@@ -114,7 +114,10 @@ def stock_news(symbol: str) -> dict:
     name = market.info(symbol).get("shortName")
     if name:
         cleaned = re.sub(r"\b(Inc\.?|Corporation|Corp\.?|Co\.?|Ltd\.?|plc|Holdings?|Class [A-C])\b", "", name).strip(" ,.")
-        items += news.gdelt(f'"{cleaned}"', timespan="14d", limit=15)
+        try:
+            items += news.gdelt(f'"{cleaned}"', timespan="14d", limit=15)
+        except news.GdeltUnavailable:
+            pass  # Yahoo headlines alone are fine
     seen, out = set(), []
     for item in items:
         key = (item.get("title") or "").lower()

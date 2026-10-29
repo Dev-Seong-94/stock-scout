@@ -74,7 +74,8 @@ def upcoming(days: int = 30, symbols: tuple[str, ...] = ()) -> dict:
     except fred.FredUnavailable as exc:
         notes.append(str(exc))
     except Exception as exc:
-        notes.append(f"FRED 발표 일정을 불러오지 못했어요: {exc}")
+        log.warning("FRED release dates failed: %s", exc)
+        notes.append("FRED 발표 일정을 불러오지 못했어요.")
     if settings.finnhub_api_key:
         events += earnings(start, end, symbols)
     else:

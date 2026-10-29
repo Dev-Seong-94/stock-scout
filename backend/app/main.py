@@ -14,6 +14,8 @@ from app.config import settings
 from app.routers import dashboard, macro, screener, stocks
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+# httpx logs every request URL at INFO, which would print API keys.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = FastAPI(title="Stock Scout API", version="0.1.0")
 app.add_middleware(

@@ -22,7 +22,11 @@ def _get(path: str, **params) -> dict:
         raise FredUnavailable("FRED_API_KEY가 backend/.env에 없어요.")
     params |= {"api_key": settings.fred_api_key, "file_type": "json"}
     r = httpx.get(f"{BASE}/{path}", params=params, timeout=20)
-    r.raise_for_status()
+    if r.status_code >= 400:
+        # Never surface httpx's message: its URL contains the api_key.
+        if r.status_code in (400, 403) and "api_key" in r.text:
+            raise FredUnavailable("FRED_API_KEY가 올바르지 않아요. backend/.env에 발급받은 키를 넣어주세요.")
+        raise RuntimeError(f"FRED 요청이 실패했어요 ({r.status_code}).")
     return r.json()
 
 
