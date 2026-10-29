@@ -7,29 +7,60 @@ import threading
 
 import pandas as pd
 
-from app.metrics import METRIC_KEYS, METRICS
+from app.metrics import METRIC_KEYS, METRICS, SECTOR_SUFFIX
 from app.snapshot import SNAPSHOT
 
 _lock = threading.Lock()
 _frame: pd.DataFrame | None = None
+_loaded_mtime = 0.0  # snapshot file version currently in memory
 
 BASE_COLUMNS = ["symbol", "name", "sector", "industry", "price"]
+POSITIVE_ONLY = {m.key for m in METRICS if m.positive_only}
+MIN_PEERS = 5  # fewer valid values than this in a sector → no percentile
+
+
+def usable(df: pd.DataFrame, key: str) -> pd.Series:
+    """A metric column as numbers, with meaningless values (≤ 0 multiples) as NaN."""
+    col = pd.to_numeric(df[key], errors="coerce")
+    return col.where(col > 0) if key in POSITIVE_ONLY else col
+
+
+def with_sector_percentiles(df: pd.DataFrame) -> pd.DataFrame:
+    """Add "<metric>@sector" columns: 0 = lowest in its sector, 100 = highest."""
+    if "sector" not in df.columns:
+        return df
+    extra = {}
+    for m in METRICS:
+        if m.key not in df.columns:
+            continue
+        col = usable(df, m.key)
+        groups = col.groupby(df["sector"])
+        ranks = groups.rank(pct=True) * 100
+        counts = groups.transform("count")
+        extra[m.key + SECTOR_SUFFIX] = ranks.where(counts >= MIN_PEERS)
+    return pd.concat([df, pd.DataFrame(extra, index=df.index)], axis=1)
 
 
 def set_frame(df: pd.DataFrame | None) -> None:
     global _frame
+    df = with_sector_percentiles(df) if df is not None else None
     with _lock:
         _frame = df
 
 
 def reload() -> None:
-    set_frame(pd.read_parquet(SNAPSHOT) if SNAPSHOT.exists() else None)
+    global _loaded_mtime
+    mtime = SNAPSHOT.stat().st_mtime if SNAPSHOT.exists() else 0.0
+    set_frame(pd.read_parquet(SNAPSHOT) if mtime else None)
+    _loaded_mtime = mtime
 
 
 def frame() -> pd.DataFrame | None:
+    """The snapshot in memory, reloaded when the file was rebuilt (e.g. by
+    scripts/build_snapshot.py in another process) so no server restart is needed."""
     with _lock:
         loaded = _frame
-    if loaded is None and SNAPSHOT.exists():
+    if SNAPSHOT.exists() and (loaded is None or SNAPSHOT.stat().st_mtime > _loaded_mtime):
         reload()
         with _lock:
             loaded = _frame
@@ -52,16 +83,18 @@ def apply_filters(
     sectors: list[str] | None = None,
     query: str = "",
 ) -> pd.DataFrame:
-    """ranges: {metric: [min|None, max|None]}. Rows missing a filtered metric are excluded."""
+    """ranges: {metric: [min|None, max|None]}, or {"metric@sector": [0–100, 0–100]}
+    for the percentile within the stock's sector. Rows missing a filtered
+    metric (or with a meaningless ≤ 0 multiple) are excluded."""
     mask = pd.Series(True, index=df.index)
     for key, bounds in (ranges or {}).items():
-        if key not in METRIC_KEYS or key not in df.columns or not bounds:
+        if key.removesuffix(SECTOR_SUFFIX) not in METRIC_KEYS or key not in df.columns or not bounds:
             continue
         lo = _num(bounds[0]) if len(bounds) > 0 else None
         hi = _num(bounds[1]) if len(bounds) > 1 else None
         if lo is None and hi is None:
             continue
-        col = pd.to_numeric(df[key], errors="coerce")
+        col = usable(df, key)
         mask &= col.notna()
         if lo is not None:
             mask &= col >= lo
@@ -99,11 +132,14 @@ def run(
     if df is None:
         return {"total": 0, "rows": [], "ready": False}
     result = apply_filters(df, ranges, sectors, query)
+    # Metrics added after the snapshot was built have no column yet; say so
+    # instead of silently ignoring the condition.
+    skipped = [k for k, b in (ranges or {}).items() if k not in df.columns and k.removesuffix(SECTOR_SUFFIX) in METRIC_KEYS and b and any(v is not None for v in b)]
     if sort in result.columns:
-        result = result.sort_values(sort, ascending=not descending, na_position="last")
+        result = result.assign(_sort=usable(result, sort)).sort_values("_sort", ascending=not descending, na_position="last")
     cols = BASE_COLUMNS + [c for c in (columns or [m.key for m in METRICS]) if c in result.columns and c not in BASE_COLUMNS]
     page = result.iloc[offset : offset + limit][cols]
-    return {"total": int(len(result)), "rows": _records(page), "ready": True}
+    return {"total": int(len(result)), "rows": _records(page), "ready": True, "skipped": skipped}
 
 
 def distribution() -> dict[str, dict]:
@@ -115,11 +151,27 @@ def distribution() -> dict[str, dict]:
     for m in METRICS:
         if m.key not in df.columns:
             continue
-        col = pd.to_numeric(df[m.key], errors="coerce").dropna()
+        col = usable(df, m.key).dropna()
         if col.empty:
             continue
         q = col.quantile([0.1, 0.5, 0.9])
         out[m.key] = {"p10": round(float(q[0.1]), 2), "p50": round(float(q[0.5]), 2), "p90": round(float(q[0.9]), 2), "count": int(len(col))}
+    return out
+
+
+def sector_percentiles(symbol: str) -> dict[str, float]:
+    """Where this stock's snapshot values sit within its sector (0–100)."""
+    df = frame()
+    if df is None:
+        return {}
+    hit = df[df["symbol"] == symbol.upper()]
+    if hit.empty:
+        return {}
+    out = {}
+    for m in METRICS:
+        v = hit.iloc[0].get(m.key + SECTOR_SUFFIX)
+        if v is not None and not pd.isna(v):
+            out[m.key] = round(float(v), 1)
     return out
 
 

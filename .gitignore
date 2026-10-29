@@ -12,6 +12,7 @@ __pycache__/
 # Generated market data (rebuilt by scripts/build_snapshot.py)
 backend/data/*
 !backend/data/fomc.json
+!backend/data/universe_extra.txt
 !backend/data/.gitkeep
 
 # Node / Next.js

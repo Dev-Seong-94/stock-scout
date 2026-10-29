@@ -26,13 +26,29 @@ export function metricValue(v: number | string | null | undefined, unit: string)
       return n >= 1000 ? `$${num(n / 1000, 2)}T` : `$${num(n, n >= 100 ? 0 : 1)}B`;
     case "$M":
       return n >= 1000 ? `$${num(n / 1000, 1)}B` : `$${num(n, 0)}M`;
+    case "%p":
+      return signed(n, 1, "%p");
+    case "mo":
+      return n >= 120 ? "10년 이상" : `${num(n, 0)}개월`;
     default:
       return num(n, n >= 100 ? 0 : 2);
   }
 }
 
+/** Like metricValue, but a ≤ 0 PER/PBR-style multiple reads "음수" instead of a misleading number. */
+export function metricCell(v: number | string | null | undefined, m: { unit: string; positive_only?: boolean }): string {
+  if (m.positive_only && typeof v === "number" && v <= 0) return "음수";
+  return metricValue(v, m.unit);
+}
+
 export function unitSuffix(unit: string): string {
-  return { "%": "%", x: "배", $B: "B$", $M: "M$" }[unit] ?? "";
+  return { "%": "%", "%p": "%p", x: "배", $B: "B$", $M: "M$", mo: "개월" }[unit] ?? "";
+}
+
+/** "섹터 하위 30%" / "섹터 상위 20%" for a 0–100 percentile (0 = lowest value). */
+export function sectorRank(p: number | null | undefined): string {
+  if (p === null || p === undefined) return "";
+  return p > 50 ? `섹터 상위 ${Math.max(1, Math.round(100 - p))}%` : `섹터 하위 ${Math.max(1, Math.round(p))}%`;
 }
 
 export function price(v: number | null | undefined, currency = "USD"): string {

@@ -1,0 +1,44 @@
+# Tickers to add to the screener on top of the S&P 1500 + Nasdaq 100.
+# One per line. Anything after # is ignored. Rebuild the snapshot after editing.
+# Tickers already in the default list are fine here; duplicates are removed.
+
+# Quantum / AI
+IONQ   # IonQ
+INOD   # Innodata
+RXRX   # Recursion Pharmaceuticals
+PLTR   # Palantir
+ZETA   # Zeta Global
+FIG    # Figma
+CRWV   # CoreWeave
+
+# Energy / power
+FRMI   # Fermi
+SMR    # NuScale Power
+ALB    # Albemarle
+
+# Mobility / space
+JOBY   # Joby Aviation
+RKLB   # Rocket Lab
+
+# Fintech / crypto
+HOOD   # Robinhood
+BLSH   # Bullish
+MSTR   # Strategy (MicroStrategy)
+OPEN   # Opendoor
+
+# Healthcare
+UNH    # UnitedHealth
+
+# Nasdaq 100 members that are not in the S&P 1500 (until the Wikipedia reader is fixed)
+ASML   # ASML
+AZN    # AstraZeneca
+PDD    # PDD Holdings
+ARM    # Arm Holdings
+MELI   # MercadoLibre
+SHOP   # Shopify
+TEAM   # Atlassian
+CCEP   # Coca-Cola Europacific
+GFS    # GlobalFoundries
+TRI    # Thomson Reuters
+MRVL   # Marvell
+ZS     # Zscaler

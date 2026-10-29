@@ -56,4 +56,8 @@ def geo(topic: str, timespan: str = "7d") -> dict:
     spec = next((t for t in news.GEO_TOPICS if t["key"] == topic), None)
     if spec is None:
         raise HTTPException(404, "알 수 없는 주제예요.")
-    return {"topic": spec["key"], "label": spec["label"], "articles": news.gdelt(spec["query"], timespan=timespan)}
+    try:
+        articles = news.gdelt(spec["query"], timespan=timespan)
+    except news.GdeltUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"topic": spec["key"], "label": spec["label"], "articles": articles}

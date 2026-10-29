@@ -124,3 +124,22 @@ def sparkline(series: pd.Series, points: int = 60) -> list[float]:
         idx = np.linspace(0, len(s) - 1, points).round().astype(int)
         s = s.iloc[idx]
     return [round(float(v), 4) for v in s.tolist()]
+
+
+def performance_since(close: pd.Series, benchmark: pd.Series, since: pd.Timestamp) -> dict | None:
+    """Return of a stock and of a benchmark from the first close on/after `since`
+    to the latest close, in %. None if there is no close after that date yet."""
+    close, benchmark = close.dropna(), benchmark.dropna()
+    stock_from = close[close.index >= since]
+    bench_from = benchmark[benchmark.index >= since]
+    if len(stock_from) < 2:
+        return None
+    stock = (stock_from.iloc[-1] / stock_from.iloc[0] - 1) * 100
+    bench = (bench_from.iloc[-1] / bench_from.iloc[0] - 1) * 100 if len(bench_from) >= 2 else None
+    return {
+        "base_date": stock_from.index[0].strftime("%Y-%m-%d"),
+        "base_price": _clean(stock_from.iloc[0]),
+        "change_pct": _clean(stock),
+        "benchmark_pct": _clean(bench),
+        "excess_pct": _clean(stock - bench) if bench is not None else None,
+    }

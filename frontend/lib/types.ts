@@ -71,10 +71,13 @@ export type Metric = {
   slider_min: number;
   slider_max: number;
   step: number;
+  positive_only: boolean;
 };
 
 export type Range = [number | null, number | null];
+/** Keys are metric keys, or "<metric>@sector" for the 0–100 percentile within the sector. */
 export type Filters = Record<string, Range>;
+export const SECTOR_SUFFIX = "@sector";
 
 export type Preset = {
   id: string;
@@ -82,6 +85,7 @@ export type Preset = {
   note?: string;
   filters: Filters;
   sectors?: string[];
+  checklist?: string[];
   builtin?: boolean;
 };
 
@@ -104,7 +108,7 @@ export type ScreenRow = {
   [metric: string]: string | number | null;
 };
 
-export type ScreenResult = { total: number; rows: ScreenRow[]; ready: boolean };
+export type ScreenResult = { total: number; rows: ScreenRow[]; ready: boolean; skipped?: string[] };
 
 export type StockDetail = {
   symbol: string;
@@ -120,7 +124,30 @@ export type StockDetail = {
   change_pct: number | null;
   metrics: Record<string, number | null>;
   sector_median: Record<string, number>;
+  sector_percentile: Record<string, number>;
   peer_count: number;
+};
+
+export type ValuationRange = {
+  current: number | null;
+  low: number;
+  high: number;
+  median: number;
+  percentile: number | null;
+  since: string;
+  years: number;
+};
+
+export type Valuation = { pe: ValuationRange | null; ps: ValuationRange | null };
+
+export type Performance = {
+  symbol: string;
+  since: string;
+  base_date?: string;
+  base_price?: number | null;
+  change_pct?: number | null;
+  benchmark_pct?: number | null;
+  excess_pct?: number | null;
 };
 
 export type PriceHistory = {
