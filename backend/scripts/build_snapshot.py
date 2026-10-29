@@ -1,7 +1,7 @@
 """Build the daily screener snapshot.
 
     cd backend
-    python -m scripts.build_snapshot            # S&P 500 + Nasdaq 100 (~10–20 min)
+    python -m scripts.build_snapshot            # S&P 1500 + Nasdaq 100 + universe_extra.txt (~45–60 min)
     python -m scripts.build_snapshot --limit 50 # quick test run
     python -m scripts.build_snapshot --refresh-universe
     python -m scripts.build_snapshot --fast     # skip annual statements (no CAGR / coverage)
@@ -17,7 +17,7 @@ import sys
 import time
 
 from app.snapshot import build_snapshot, load_meta
-from app.universe import load_universe, refresh_universe
+from app.universe import describe_universe, load_universe, refresh_universe
 
 
 def main() -> None:
@@ -29,8 +29,11 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.refresh_universe:
-        print(f"universe: {len(refresh_universe())} tickers")
+        uni = refresh_universe()
+        for p in uni.attrs.get("problems", []):
+            print(f"warning: {p}")
     symbols = load_universe()
+    print(describe_universe(symbols))
     if args.limit:
         symbols = symbols[: args.limit]
 

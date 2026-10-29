@@ -62,7 +62,7 @@ pip install -r requirements.txt
 
 pytest -q                                   # 계산 로직 테스트 (네트워크 불필요)
 python -m scripts.build_snapshot --limit 30 # 먼저 30종목으로 빠르게 확인
-python -m scripts.build_snapshot            # 전체 (S&P 500 + 나스닥 100, 10–20분)
+python -m scripts.build_snapshot            # 전체 (S&P 1500 + 나스닥 100 + 추가 종목, 45–60분)
 
 uvicorn app.main:app --reload --port 8000
 ```
@@ -70,7 +70,12 @@ uvicorn app.main:app --reload --port 8000
 http://localhost:8000/docs 에서 API를 직접 눌러볼 수 있어요. `/api/health`에서 키 설정 여부를 확인하세요.
 
 스냅샷은 하루 한 번 다시 만들면 돼요. 스크리너 화면의 버튼이나 `POST /api/screener/refresh`로도 만들 수 있어요.
-원하는 종목만 보고 싶으면 `backend/data/universe.txt`에 한 줄에 하나씩 티커를 적어 두면 그 목록을 써요.
+**스크리너 대상 종목**은 S&P 500 · S&P 400(중형주) · S&P 600(소형주) · 나스닥 100(약 1,500개)이에요.
+
+- `backend/data/universe_extra.txt`: 여기에 적은 티커가 기본 목록에 **추가**돼요. S&P 지수는 흑자 기업만 편입하기 때문에 IonQ 같은 적자 성장주는 여기에 적어 주세요.
+- `backend/data/universe.txt`: 이 파일이 있으면 기본 목록 **대신** 여기 적힌 종목만 써요.
+
+중간에 멈춰도 25종목마다 저장되니 다시 실행하면 이어서 진행해요.
 
 ### 3. 프론트엔드
 

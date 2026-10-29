@@ -112,3 +112,35 @@ def test_regime_reads_inversion_and_stress():
     out = read_regime({"vix": {"value": 32.0}, "curve": {"value": -0.4}, "spx": {"dist_sma200": -5.0}})
     tones = {s["label"]: s["tone"] for s in out}
     assert tones == {"변동성": "stress", "금리 곡선": "stress", "추세": "stress"}
+
+
+def test_pick_constituents_handles_footnotes_and_classes():
+    from app.universe import pick_constituents
+
+    noise = pd.DataFrame({"Date": ["x"] * 60, "Added": ["y"] * 60})
+    names = [f"Co {i}" for i in range(60)]
+    table = pd.DataFrame({"Ticker[3]": ["BRK.B", "aapl"] + [f"T{i}" for i in range(58)], "Company": names})
+    out = pick_constituents([noise, table])
+    assert out["ticker"].tolist()[:2] == ["BRK-B", "AAPL"] and len(out) == 60
+
+
+def test_load_universe_adds_extra(tmp_path, monkeypatch):
+    from app import universe
+
+    csv = tmp_path / "universe.csv"
+    pd.DataFrame({"ticker": ["AAPL", "MSFT"], "name": ["a", "m"], "index": ["S&P 500", "S&P 400, S&P 600"]}).to_csv(csv, index=False)
+    extra = tmp_path / "universe_extra.txt"
+    extra.write_text("# comment\nionq   # quantum\nAAPL\n\n")
+    monkeypatch.setattr(universe, "UNIVERSE_CSV", csv)
+    monkeypatch.setattr(universe, "EXTRA", extra)
+    monkeypatch.setattr(universe, "OVERRIDE", tmp_path / "missing.txt")
+    assert universe.load_universe() == ["AAPL", "IONQ", "MSFT"]
+    assert "extra 1 (IONQ)" in universe.describe_universe(["AAPL", "IONQ", "MSFT"])
+
+
+def test_pick_constituents_header_in_first_row():
+    from app.universe import pick_constituents
+
+    rows = [["Ticker", "Company", "ICB Industry"]] + [[f"T{i}", f"Co {i}", "Tech"] for i in range(101)]
+    out = pick_constituents([pd.DataFrame(rows)])
+    assert len(out) == 101 and out["ticker"].iloc[0] == "T0"
