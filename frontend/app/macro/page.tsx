@@ -49,7 +49,8 @@ function SeriesGrid() {
         </div>
       </div>
       {data.error ? <ErrorNote message={data.error} onRetry={data.reload} /> : null}
-      <div className="macro-grid">
+      {/* Old charts stay visible while the next tab loads; dim them so the click visibly registered. */}
+      <div className={`macro-grid ${data.loading && data.data ? "is-loading" : ""}`} aria-busy={data.loading}>
         {data.loading && !data.data
           ? Array.from({ length: 4 }, (_, i) => (
               <div key={i} className="panel panel__body">

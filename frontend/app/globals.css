@@ -1464,3 +1464,9 @@ textarea {
   flex-wrap: wrap;
   gap: 0.25rem 1.25rem;
 }
+
+.macro-grid.is-loading {
+  opacity: 0.45;
+  transition: opacity 0.15s ease 0.1s; /* skip the flash when the answer is instant */
+  pointer-events: none;
+}
