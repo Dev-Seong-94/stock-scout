@@ -8,6 +8,7 @@ import LineChart from "@/components/LineChart";
 import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { metricCell, metricValue, num, price, relativeTime, sectorRank } from "@/lib/format";
+import { notables } from "@/lib/notables";
 import { useWatchlist } from "@/lib/storage";
 import type { Article, Catalog, Filing, Ownership, PriceHistory, StockDetail, Valuation, ValuationRange } from "@/lib/types";
 
@@ -96,6 +97,37 @@ function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalo
           </div>
         </div>
       ))}
+    </section>
+  );
+}
+
+function AtAGlance({ detail, catalog, onReadFilings }: { detail: StockDetail; catalog: Catalog; onReadFilings: () => void }) {
+  const items = notables(detail, catalog.metrics);
+  return (
+    <section className="panel glance" aria-labelledby="glance-title">
+      <div className="panel__head">
+        <h2 id="glance-title">한눈에 보기</h2>
+        <span className="small muted">정해진 규칙으로 뽑은 사실이에요. 좋고 나쁨의 판단은 아니에요.</span>
+      </div>
+      <div className="panel__body">
+        {items.length ? (
+          <ul className="glance__list">
+            {items.map((n) => (
+              <li key={n.text} className={n.watch ? "is-watch" : undefined}>
+                {n.text}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="small muted">섹터 안에서 특별히 튀는 숫자는 없어요.</p>
+        )}
+        <p className="glance__next small">
+          <b>다음 단계</b> 숫자는 출발점이에요. 회사가 직접 쓴 최근 분기 보고서(10-Q)나 실적 발표(8-K)를 한 번은 읽어 보세요.{" "}
+          <button type="button" className="btn btn--ghost small" onClick={onReadFilings}>
+            공시 보기
+          </button>
+        </p>
+      </div>
     </section>
   );
 }
@@ -372,6 +404,16 @@ export default function StockPage() {
       {detail.error ? <ErrorNote message={detail.error} onRetry={detail.reload} /> : null}
 
       <div className="grid stock-grid">
+        {d && catalog.data ? (
+          <AtAGlance
+            detail={d}
+            catalog={catalog.data}
+            onReadFilings={() => {
+              setTab("filings");
+              document.getElementById("details-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
+        ) : null}
         <PriceChart symbol={symbol} />
         {d?.summary ? (
           <details className="panel summary">
@@ -387,7 +429,7 @@ export default function StockPage() {
         <ValuationHistory symbol={symbol} />
         {d && catalog.data ? <MetricCards detail={d} catalog={catalog.data} /> : detail.loading ? <Skeleton height={300} /> : null}
 
-        <section className="panel" aria-label="수급, 뉴스, 공시">
+        <section className="panel" id="details-tabs" aria-label="수급, 뉴스, 공시">
           <div className="panel__head">
             <Tabs
               label="세부 정보"

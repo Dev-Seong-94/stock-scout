@@ -89,6 +89,35 @@ function describeRange(key: string, r: Range, m: Metric) {
   return `${metricValue(hi, m.unit)} 이하`;
 }
 
+/** First screen: example combinations as a starting point instead of 38 empty filters. */
+function StartHere({ presets, onPick, onSkip }: { presets: Preset[]; onPick: (p: Preset) => void; onSkip: () => void }) {
+  return (
+    <section className="panel start-here" aria-labelledby="start-here-title">
+      <div className="start-here__head">
+        <div>
+          <h2 id="start-here-title">어디서 시작할까요?</h2>
+          <p className="small muted">
+            예시 조합을 하나 고르면 조건이 채워지고, 왼쪽에서 숫자를 바꿔 볼 수 있어요. 추천이 아니라 거르는 방법의 예시예요.
+          </p>
+        </div>
+        <button type="button" className="btn btn--ghost small" onClick={onSkip}>
+          직접 고를게요
+        </button>
+      </div>
+      <ul className="start-here__list">
+        {presets.map((p) => (
+          <li key={p.id}>
+            <button type="button" className="start-card" onClick={() => onPick(p)}>
+              <b>{p.name}</b>
+              {p.note ? <span className="small muted">{p.note}</span> : null}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function toCsv(rows: ScreenResult["rows"], columns: string[]) {
   const head = ["symbol", "name", "sector", "price", ...columns];
   const esc = (v: unknown) => {
@@ -168,7 +197,9 @@ function Screener() {
   const [busy, setBusy] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [savingPreset, setSavingPreset] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ valuation: true });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [metricQuery, setMetricQuery] = useState("");
+  const [skipStart, setSkipStart] = useState(false);
   const [showFilters, setShowFilters] = useState(false); // only matters on narrow screens
   const [sectorMode, setSectorMode] = useState<Record<string, boolean>>({});
   const [presetChecklist, setPresetChecklist] = useState<{ name: string; items: string[] } | null>(null);
@@ -275,6 +306,9 @@ function Screener() {
   const sectorLabel = new Map(catalog.sectors.map((s) => [s.key, s.label]));
   const builtAt = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
   const staleDays = builtAt ? Math.floor((Date.now() - builtAt.getTime()) / 86400000) : 0;
+  const mq = metricQuery.trim().toLowerCase();
+  const matchesQuery = (m: Metric) => !mq || `${m.label} ${m.key} ${m.description}`.toLowerCase().includes(mq);
+  const showStart = !skipStart && !activeKeys.length && !sectors.length && !query && !!catalog.snapshot;
   const skipped = (result?.skipped ?? []).map((k) => metricsByKey.get(baseKey(k))?.label ?? k);
   const checklist = presetChecklist?.items ?? (lookingAtFallen ? FALLEN_CHECKLIST : []);
 
@@ -400,10 +434,22 @@ function Screener() {
             </div>
           </div>
 
+          <div className="filters__find">
+            <input
+              className="input"
+              type="search"
+              placeholder="지표 찾기 (예: PER, 배당, 부채)"
+              aria-label="지표 찾기"
+              value={metricQuery}
+              onChange={(e) => setMetricQuery(e.target.value)}
+            />
+          </div>
+
           {catalog.groups.map((g) => {
-            const metrics = catalog.metrics.filter((m) => m.group === g.key);
+            const metrics = catalog.metrics.filter((m) => m.group === g.key && matchesQuery(m));
+            if (mq && !metrics.length) return null;
             const count = metrics.filter((m) => isActive(filters[m.key]) || isActive(filters[m.key + SECTOR_SUFFIX])).length;
-            const open = openGroups[g.key] ?? count > 0;
+            const open = mq ? true : (openGroups[g.key] ?? count > 0);
             return (
               <div key={g.key} className="filters__group">
                 <button
@@ -413,7 +459,7 @@ function Screener() {
                   onClick={() => setOpenGroups((o) => ({ ...o, [g.key]: !open }))}
                 >
                   <span>{g.label}</span>
-                  {count ? <span className="count">{count}</span> : null}
+                  {count ? <span className="count">{count}</span> : <span className="small muted">{metrics.length}개</span>}
                   <span className="chev" aria-hidden="true">
                     {open ? "−" : "+"}
                   </span>
@@ -521,6 +567,17 @@ function Screener() {
 
           {error ? <ErrorNote message={error} /> : null}
 
+          {showStart ? (
+            <StartHere
+              presets={catalog.presets}
+              onPick={applyPreset}
+              onSkip={() => {
+                setSkipStart(true);
+                setShowFilters(true);
+              }}
+            />
+          ) : null}
+
           {skipped.length ? (
             <p className="note small">
               <b>{skipped.join(", ")}</b> 조건은 지금 데이터에 없어서 적용되지 않았어요. 새로 추가된 지표라 스냅샷을 다시 만들어야 해요 (backend 폴더에서{" "}
@@ -584,6 +641,7 @@ function Screener() {
                         {r.symbol}
                       </Link>
                       <span className="results__name">{r.name}</span>
+                      {r.other_classes ? <span className="results__name">같은 회사 다른 주식: {r.other_classes}</span> : null}
                     </td>
                     <td className="left muted">{sectorLabel.get(r.sector ?? "") ?? r.sector ?? "–"}</td>
                     <td>{price(r.price as number | null)}</td>

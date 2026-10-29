@@ -25,9 +25,13 @@ class SearchBody(BaseModel):
 def metrics() -> dict:
     """Metric definitions with Korean explanations, sectors, example presets,
     plus the current distribution of each metric across the universe."""
+    meta = snapshot.load_meta()
+    df = screener.frame()
+    if meta and df is not None:
+        meta["count"] = int(len(screener.primary(df)))  # companies, not share classes
     return metric_catalog() | {
         "distribution": screener.distribution(),
-        "snapshot": snapshot.load_meta(),
+        "snapshot": meta,
         "status": snapshot.status,
     }
 

@@ -9,6 +9,7 @@ import pytest
 from app import indicators as ind
 from app.metrics import METRICS, METRIC_KEYS, PRESETS, SECTOR_SUFFIX
 from app.regime import read_regime
+from app import screener
 from app.screener import apply_filters, with_sector_percentiles
 from app.snapshot import build_row, cash_runway_months, financial_extras, fundamentals_from_info
 from app.valuation import valuation_ranges
@@ -195,6 +196,31 @@ def test_positive_only_multiples_and_sector_percentiles():
     assert df.loc[df.symbol == "A", "roe@sector"].item() == pytest.approx(20.0)
     assert df.loc[df.symbol == "F", "roe@sector"].isna().item()  # Energy has 2 peers
     assert list(apply_filters(df, {"roe@sector": [None, 40]})["symbol"]) == ["A", "B"]
+
+
+def test_share_classes_counted_once(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "symbol": ["GOOG", "GOOGL", "A", "B", "C", "D"],
+            "name": ["Alphabet Inc.", "Alphabet Inc.", "a", "b", "c", "d"],
+            "sector": ["Tech"] * 6,
+            "avg_dollar_volume": [1.0, 2.0, 1.0, 1.0, 1.0, 1.0],
+            "roe": [30.0, 30.0, 1.0, 2.0, 3.0, 4.0],
+            "market_cap": [100.0, 100.0, 1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    monkeypatch.setattr(screener, "frame", lambda: screener._frame)
+    screener.set_frame(df)
+    result = screener.run()
+    symbols = [r["symbol"] for r in result["rows"]]
+    assert result["total"] == 5 and "GOOG" not in symbols  # the more traded class stays
+    assert result["rows"][0]["other_classes"] == "GOOG"
+    # Percentiles among 5 companies, not 6; the secondary class gets the same value.
+    assert screener.sector_percentiles("GOOGL")["roe"] == pytest.approx(100.0)
+    assert screener.sector_percentiles("GOOG")["roe"] == pytest.approx(100.0)
+    assert screener.sector_percentiles("A")["roe"] == pytest.approx(20.0)
+    assert screener.run(query="goog")["total"] == 2  # searching by ticker finds both classes
+    screener.set_frame(None)
 
 
 def test_valuation_ranges_use_published_annual_figures():

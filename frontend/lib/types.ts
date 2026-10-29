@@ -105,6 +105,7 @@ export type ScreenRow = {
   sector: string | null;
   industry: string | null;
   price: number | null;
+  other_classes: string | null; // other share classes of the same company, e.g. "GOOG"
   [metric: string]: string | number | null;
 };
 

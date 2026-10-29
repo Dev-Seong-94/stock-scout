@@ -14,7 +14,7 @@ _lock = threading.Lock()
 _frame: pd.DataFrame | None = None
 _loaded_mtime = 0.0  # snapshot file version currently in memory
 
-BASE_COLUMNS = ["symbol", "name", "sector", "industry", "price"]
+BASE_COLUMNS = ["symbol", "name", "sector", "industry", "price", "other_classes"]
 POSITIVE_ONLY = {m.key for m in METRICS if m.positive_only}
 MIN_PEERS = 5  # fewer valid values than this in a sector → no percentile
 
@@ -41,9 +41,44 @@ def with_sector_percentiles(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df, pd.DataFrame(extra, index=df.index)], axis=1)
 
 
+def mark_share_classes(df: pd.DataFrame) -> pd.DataFrame:
+    """One company listed as several share classes (GOOG/GOOGL, FOX/FOXA):
+    keep the most traded as the primary row. The others get "share_class_of"
+    and are left out of results, percentiles and medians so a company is not
+    counted twice; the primary row lists them in "other_classes"."""
+    df = df.copy()
+    df["share_class_of"] = None
+    df["other_classes"] = None
+    if "name" not in df.columns:
+        return df
+    volume = pd.to_numeric(df.get("avg_dollar_volume"), errors="coerce").fillna(0) if "avg_dollar_volume" in df else pd.Series(0, index=df.index)
+    named = df[df["name"].notna()]
+    for _, idx in named.groupby("name").groups.items():
+        if len(idx) < 2:
+            continue
+        ordered = volume.loc[idx].sort_values(ascending=False).index
+        primary, rest = ordered[0], list(ordered[1:])
+        df.loc[rest, "share_class_of"] = df.at[primary, "symbol"]
+        df.at[primary, "other_classes"] = ", ".join(df.loc[rest, "symbol"])
+    return df
+
+
+def primary(df: pd.DataFrame) -> pd.DataFrame:
+    """Rows without the secondary share classes."""
+    return df[df["share_class_of"].isna()] if "share_class_of" in df.columns else df
+
+
 def set_frame(df: pd.DataFrame | None) -> None:
     global _frame
-    df = with_sector_percentiles(df) if df is not None else None
+    if df is not None:
+        df = mark_share_classes(df)
+        main = with_sector_percentiles(primary(df))
+        # Secondary classes share the company's fundamentals: give them its percentiles.
+        pct_cols = [c for c in main.columns if c.endswith(SECTOR_SUFFIX)]
+        by_symbol = main.set_index("symbol")[pct_cols]
+        rest = df[df["share_class_of"].notna()]
+        rest = pd.concat([rest, by_symbol.reindex(rest["share_class_of"]).set_axis(rest.index)], axis=1)
+        df = pd.concat([main, rest]).sort_index()
     with _lock:
         _frame = df
 
@@ -131,13 +166,14 @@ def run(
     df = frame()
     if df is None:
         return {"total": 0, "rows": [], "ready": False}
-    result = apply_filters(df, ranges, sectors, query)
+    # A search by name or ticker may look for a specific share class.
+    result = apply_filters(df if query.strip() else primary(df), ranges, sectors, query)
     # Metrics added after the snapshot was built have no column yet; say so
     # instead of silently ignoring the condition.
     skipped = [k for k, b in (ranges or {}).items() if k not in df.columns and k.removesuffix(SECTOR_SUFFIX) in METRIC_KEYS and b and any(v is not None for v in b)]
     if sort in result.columns:
         result = result.assign(_sort=usable(result, sort)).sort_values("_sort", ascending=not descending, na_position="last")
-    cols = BASE_COLUMNS + [c for c in (columns or [m.key for m in METRICS]) if c in result.columns and c not in BASE_COLUMNS]
+    cols = [c for c in BASE_COLUMNS if c in result.columns] + [c for c in (columns or [m.key for m in METRICS]) if c in result.columns and c not in BASE_COLUMNS]
     page = result.iloc[offset : offset + limit][cols]
     return {"total": int(len(result)), "rows": _records(page), "ready": True, "skipped": skipped}
 
@@ -147,6 +183,7 @@ def distribution() -> dict[str, dict]:
     df = frame()
     if df is None:
         return {}
+    df = primary(df)
     out = {}
     for m in METRICS:
         if m.key not in df.columns:
@@ -187,4 +224,5 @@ def sector_peers(sector: str | None) -> pd.DataFrame | None:
     df = frame()
     if df is None or not sector:
         return None
+    df = primary(df)
     return df[df["sector"] == sector]

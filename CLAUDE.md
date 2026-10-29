@@ -105,6 +105,13 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
   `/api/screener/search` returns it in `skipped` and the UI says to rebuild.
 - Yahoo returns `profitMargins = 0` for deeply negative margins; snapshot
   recomputes net margin from netIncomeToCommon / totalRevenue.
+- Share classes of one company (GOOG/GOOGL, FOX/FOXA, NWS/NWSA, UA/UAA,
+  CENT/CENTA; matched by name): the most traded is the primary row
+  (`other_classes`), the rest get `share_class_of` and are left out of results,
+  percentiles, medians and the header count unless searched for by name.
+- Stock page "한눈에 보기" (`frontend/lib/notables.ts`) is fixed rules stating
+  facts (losses, runway, dilution, sector extremes, price position), never a
+  verdict, and ends by pointing to the 10-Q/8-K.
 - "적자 성장주 점검" metrics: cash_runway (months; None when not burning cash),
   share_change_1y (diluted shares YoY), gross_margin_change (%p YoY). They need
   a full snapshot rebuild to appear in the screener.
