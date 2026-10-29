@@ -6,6 +6,8 @@ Run from the backend folder:  uvicorn app.main:app --reload --port 8000
 from __future__ import annotations
 
 import logging
+import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +19,15 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 # httpx logs every request URL at INFO, which would print API keys.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-app = FastAPI(title="Stock Scout API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if settings.fred_api_key:
+        threading.Thread(target=macro.warm, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Stock Scout API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

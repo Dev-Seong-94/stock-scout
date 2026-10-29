@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
@@ -14,29 +16,49 @@ def groups() -> dict:
     return {"groups": [{"key": g["key"], "label": g["label"]} for g in fred.MACRO_GROUPS]}
 
 
+# Every period is cut from one long download per series, so switching
+# 2y/5y/10y/20y never refetches from FRED.
+MAX_YEARS = 30
+
+
+def _one(item: dict, years: int) -> dict:
+    try:
+        s = fred.transform(fred.series(item["id"], years=MAX_YEARS + 1), item["how"])
+        s = s[s.index >= s.index.max() - pd.DateOffset(years=years)]
+    except fred.FredUnavailable:
+        raise
+    except Exception:
+        return item | {"error": "데이터를 불러오지 못했어요.", "points": []}
+    return item | {
+        "latest": _clean(s.iloc[-1]) if len(s) else None,
+        "as_of": s.index[-1].strftime("%Y-%m-%d") if len(s) else None,
+        "points": [[d.strftime("%Y-%m-%d"), round(float(v), 3)] for d, v in s.items()],
+    }
+
+
+def warm() -> None:
+    """Fetch every macro series once in the background so the first tab clicks are instant."""
+    for group in fred.MACRO_GROUPS:
+        for item in group["series"]:
+            try:
+                fred.series(item["id"], years=MAX_YEARS + 1)
+            except fred.FredUnavailable:
+                return
+            except Exception:
+                continue
+
+
 @router.get("/series")
-def series(group: str, years: int = Query(10, ge=1, le=30)) -> dict:
+def series(group: str, years: int = Query(10, ge=1, le=MAX_YEARS)) -> dict:
     spec = next((g for g in fred.MACRO_GROUPS if g["key"] == group), None)
     if spec is None:
         raise HTTPException(404, "알 수 없는 그룹이에요.")
-    out = []
-    for item in spec["series"]:
+    # Fetch the group's series in parallel instead of one after another.
+    with ThreadPoolExecutor(max_workers=len(spec["series"])) as pool:
         try:
-            s = fred.transform(fred.series(item["id"], years=years + 1), item["how"])
-            s = s[s.index >= s.index.max() - pd.DateOffset(years=years)]
+            out = list(pool.map(lambda item: _one(item, years), spec["series"]))
         except fred.FredUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
-        except Exception:
-            out.append(item | {"error": "데이터를 불러오지 못했어요.", "points": []})
-            continue
-        out.append(
-            item
-            | {
-                "latest": _clean(s.iloc[-1]) if len(s) else None,
-                "as_of": s.index[-1].strftime("%Y-%m-%d") if len(s) else None,
-                "points": [[d.strftime("%Y-%m-%d"), round(float(v), 3)] for d, v in s.items()],
-            }
-        )
     return {"group": spec["key"], "label": spec["label"], "series": out}
 
 
