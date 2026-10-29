@@ -5,12 +5,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.cache import ttl_cache
 from app.indicators import _clean, pct_from_sma, percentile_rank, sparkline
 from app.regime import read_regime
-from app.services import calendar, fred, market, news, sentiment
+from app import screener
+from app.services import calendar, finra, fred, insiders, market, news, sentiment
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -126,3 +127,47 @@ def week() -> dict:
     """This week's scheduled events and the latest market headlines."""
     cal = calendar.upcoming(days=7)
     return {"events": cal["events"], "notes": cal["notes"], "headlines": news.rss()[:12]}
+
+
+@router.get("/insiders")
+def insider_flow() -> dict:
+    """Open-market insider buys vs sells per week, against the usual level."""
+    insiders.refresh_in_background()
+    tx = insiders.recent_tx()
+    weeks = insiders.weekly(tx).tail(6)
+    this_week = weeks["week"].max() if not weeks.empty else None
+    names = {}
+    df = screener.frame()
+    if df is not None:
+        names = dict(zip(df["symbol"], df["name"]))
+    last7 = tx[pd.to_datetime(tx["filed"]) > pd.Timestamp.today().normalize() - pd.Timedelta(days=7)] if not tx.empty else tx
+
+    def named(rows: list[dict]) -> list[dict]:
+        return [r | {"name": names.get(r["ticker"])} for r in rows]
+
+    return {
+        "status": {k: insiders.status[k] for k in ("running", "done", "total", "error")},
+        "weeks": [
+            {
+                "week": w.week.strftime("%Y-%m-%d"),
+                "partial": w.week == this_week and datetime.now().weekday() < 5,
+                "buy_filings": int(w.buy_filings),
+                "sell_filings": int(w.sell_filings),
+                "buy_value": round(float(w.buy_value)),
+                "sell_value": round(float(w.sell_value)),
+                "ratio": insiders.ratio(w.sell_filings, w.buy_filings),
+            }
+            for w in weeks.itertuples()
+        ],
+        "baseline": (b := insiders.baseline()) and b | {"ratio": insiders.ratio(b["sell_filings"], b["buy_filings"])},
+        "top_sells": named(insiders.top_names(last7, "S")),
+        "top_buys": named(insiders.top_names(last7, "P")),
+    }
+
+
+@router.get("/margin")
+def margin_debt() -> dict:
+    try:
+        return finra.margin()
+    except finra.FinraUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc

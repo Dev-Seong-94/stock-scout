@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import CandleChart from "@/components/CandleChart";
 import LineChart from "@/components/LineChart";
 import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
@@ -13,10 +14,12 @@ import { useWatchlist } from "@/lib/storage";
 import type { Article, Catalog, Filing, Ownership, PriceHistory, StockDetail, Valuation, ValuationRange } from "@/lib/types";
 
 type RangeKey = "1m" | "3m" | "6m" | "1y" | "3y" | "5y";
+type ChartKind = "candle" | "line";
 type TabKey = "flow" | "news" | "filings";
 
 function PriceChart({ symbol }: { symbol: string }) {
-  const [range, setRange] = useState<RangeKey>("1y");
+  const [range, setRange] = useState<RangeKey>("6m");
+  const [kind, setKind] = useState<ChartKind>("candle");
   const { data, error, loading } = useApi<PriceHistory>(`/api/stocks/${symbol}/history?range=${range}`);
   const first = data?.close.find((v) => v !== null) ?? null;
   const last = data ? [...data.close].reverse().find((v) => v !== null) ?? null : null;
@@ -28,20 +31,58 @@ function PriceChart({ symbol }: { symbol: string }) {
         <h2 id="chart-title">
           주가 <Change value={change} digits={1} className="small" />
         </h2>
-        <Tabs
-          label="기간"
-          value={range}
-          onChange={setRange}
-          options={(["1m", "3m", "6m", "1y", "3y", "5y"] as RangeKey[]).map((r) => ({
-            value: r,
-            label: { "1m": "1개월", "3m": "3개월", "6m": "6개월", "1y": "1년", "3y": "3년", "5y": "5년" }[r],
-          }))}
-        />
+        <div className="chart-controls">
+          <Tabs
+            label="차트 종류"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: "candle", label: "봉" },
+              { value: "line", label: "선" },
+            ]}
+          />
+          <Tabs
+            label="기간"
+            value={range}
+            onChange={setRange}
+            options={(["1m", "3m", "6m", "1y", "3y", "5y"] as RangeKey[]).map((r) => ({
+              value: r,
+              label: { "1m": "1개월", "3m": "3개월", "6m": "6개월", "1y": "1년", "3y": "3년", "5y": "5년" }[r],
+            }))}
+          />
+        </div>
       </div>
       <div className="panel__body">
         {error ? <ErrorNote message={error} /> : null}
         {loading && !data ? <Skeleton height={280} /> : null}
-        {data ? (
+        {data && kind === "candle" ? (
+          <>
+            <CandleChart
+              ariaLabel={`${symbol} 봉 차트`}
+              dates={data.dates}
+              open={data.open}
+              high={data.high}
+              low={data.low}
+              close={data.close}
+              volume={data.volume}
+              height={340}
+              overlays={[
+                { label: data.sma_fast_label, values: data.sma_fast, color: "var(--accent)", width: 1.25 },
+                { label: data.sma_labels[0], values: data.sma_short, color: "var(--watch)", width: 1.25 },
+                { label: data.sma_labels[1], values: data.sma_long, color: "var(--muted)", width: 1.25, dashed: true },
+              ]}
+            />
+            <details className="small muted candle-help">
+              <summary>봉 읽는 법</summary>
+              <p>
+                봉 하나가 {range === "3y" || range === "5y" ? "한 주" : "하루"}예요. <span className="up">■</span> 시작가보다 올라서 끝난 봉,{" "}
+                <span className="down">■</span> 내려서 끝난 봉이에요. 굵은 몸통은 시작가와 끝난 가격 사이, 위아래 가는 선(꼬리)은 그 기간에 가장
+                높았던·낮았던 가격이에요. 꼬리가 길면 중간에 크게 흔들렸다는 뜻이에요. 아래 막대는 거래량이고, 마우스를 올리면 그날 숫자가 위에 나와요.
+              </p>
+            </details>
+          </>
+        ) : null}
+        {data && kind === "line" ? (
           <LineChart
             ariaLabel={`${symbol} 주가 차트`}
             dates={data.dates}
@@ -97,6 +138,77 @@ function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalo
           </div>
         </div>
       ))}
+    </section>
+  );
+}
+
+function usd(v: number | null | undefined) {
+  if (v === null || v === undefined) return "–";
+  if (v >= 1e12) return `$${num(v / 1e12, 2)}T`;
+  if (v >= 1e9) return `$${num(v / 1e9, 1)}B`;
+  if (v >= 1e6) return `$${num(v / 1e6, 0)}M`;
+  return `$${num(v, 0)}`;
+}
+
+/** The company's own description, cut to its first sentences. */
+function firstSentences(text: string, count: number) {
+  const parts = text.match(/[^.!?]+(?:[.!?](?=\s+[A-Z]|$))+/g) ?? [text];
+  return parts.slice(0, count).join("").trim();
+}
+
+function CompanyProfile({ detail }: { detail: StockDetail }) {
+  const [full, setFull] = useState(false);
+  const summary = detail.summary ?? "";
+  const short = firstSentences(summary, 2);
+  const marketCap = detail.metrics.market_cap;
+  return (
+    <section className="panel profile" aria-labelledby="profile-title">
+      <div className="panel__head">
+        <h2 id="profile-title">어떤 회사인가요</h2>
+      </div>
+      <div className="panel__body">
+        <dl className="profile__facts">
+          {detail.industry_label ? (
+            <div>
+              <dt>업종</dt>
+              <dd>
+                <b>{detail.industry_label}</b> <span className="muted small">{detail.industry}</span>
+                {detail.industry_about ? <span className="profile__about">{detail.industry_about}</span> : null}
+              </dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>규모</dt>
+            <dd>
+              시가총액 <b>{marketCap != null ? usd(marketCap * 1e9) : "–"}</b> · 최근 12개월 매출 <b>{usd(detail.revenue)}</b>
+              {detail.employees ? (
+                <>
+                  {" "}
+                  · 직원 <b>{detail.employees.toLocaleString()}명</b>
+                </>
+              ) : null}
+            </dd>
+          </div>
+        </dl>
+        {summary ? (
+          <div className="profile__summary">
+            <p lang="en">{full ? summary : short}</p>
+            <p className="small muted">
+              회사 설명 출처: Yahoo Finance (영문). 브라우저의 번역 기능(오른쪽 클릭 → 한국어로 번역)을 쓰면 한국어로 볼 수 있어요.{" "}
+              {short.length < summary.length ? (
+                <button type="button" className="btn btn--ghost small" onClick={() => setFull((f) => !f)}>
+                  {full ? "짧게 보기" : "전체 설명 보기"}
+                </button>
+              ) : null}
+              {detail.website ? (
+                <a href={detail.website} target="_blank" rel="noreferrer">
+                  회사 홈페이지
+                </a>
+              ) : null}
+            </p>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -425,7 +537,7 @@ export default function StockPage() {
           </h1>
           {d ? (
             <p className="muted small">
-              {[d.sector_label, d.industry].filter(Boolean).join(" · ")}
+              {[d.sector_label, d.industry_label ?? d.industry].filter(Boolean).join(" · ")}
               {d.employees ? ` · 직원 ${d.employees.toLocaleString()}명` : ""}
             </p>
           ) : null}
@@ -450,6 +562,7 @@ export default function StockPage() {
       {detail.error ? <ErrorNote message={detail.error} onRetry={detail.reload} /> : null}
 
       <div className="grid stock-grid">
+        {d ? <CompanyProfile detail={d} /> : null}
         {d && catalog.data ? (
           <AtAGlance
             detail={d}
@@ -461,17 +574,6 @@ export default function StockPage() {
           />
         ) : null}
         <PriceChart symbol={symbol} />
-        {d?.summary ? (
-          <details className="panel summary">
-            <summary>회사 소개 (영문)</summary>
-            <p>{d.summary}</p>
-            {d.website ? (
-              <a href={d.website} target="_blank" rel="noreferrer" className="small">
-                {d.website}
-              </a>
-            ) : null}
-          </details>
-        ) : null}
         <ValuationHistory symbol={symbol} />
         {d && catalog.data ? <MetricCards detail={d} catalog={catalog.data} /> : detail.loading ? <Skeleton height={300} /> : null}
 

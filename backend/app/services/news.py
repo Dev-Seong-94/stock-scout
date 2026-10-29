@@ -112,7 +112,11 @@ def rss(limit_per_feed: int = 8) -> list[dict]:
     items = []
     for feed in RSS_FEEDS:
         try:
-            parsed = feedparser.parse(feed["url"])
+            # Fetch with httpx (certifi CA bundle): feedparser's own urllib fetch fails
+            # certificate checks on python.org builds of Python for macOS.
+            r = httpx.get(feed["url"], timeout=20, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0 (stock-scout)"})
+            r.raise_for_status()
+            parsed = feedparser.parse(r.content)
         except Exception as exc:
             log.warning("RSS %s failed: %s", feed["name"], exc)
             continue

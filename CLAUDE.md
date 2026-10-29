@@ -33,7 +33,8 @@ backend/   FastAPI (Python 3.11 venv in backend/.venv)
   app/screener.py     filters the snapshot in memory; adds "<metric>@sector" percentile columns
   app/universe.py     which tickers the snapshot covers
   app/services/       fred, market (yfinance), sec, news (GDELT + RSS),
-                      sentiment (CNN Fear & Greed, unofficial), calendar
+                      sentiment (CNN Fear & Greed, unofficial), calendar,
+                      insiders (weekly Form 4 buys/sells), finra (margin debt)
   app/routers/        dashboard, screener, stocks, macro
   scripts/build_snapshot.py
   tests/test_core.py  offline tests (pytest -q)
@@ -44,6 +45,7 @@ frontend/  Next.js 16 App Router, React 19, plain CSS (app/globals.css tokens)
   app/macro/page.tsx           FRED trends, 30-day calendar, geopolitics (GDELT)
   app/watchlist/page.tsx       watchlist with reason/memo
   components/LineChart.tsx     hand-rolled SVG chart (no chart library)
+  components/CandleChart.tsx   candlesticks + volume + moving averages (stock page default)
 ```
 
 Run: `cd backend && uvicorn app.main:app --reload --port 8000` and
@@ -117,6 +119,14 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
   Form 4 and 144 are parsed from their raw XML (the `xsl…/` path prefix is
   the HTML rendering), 8-K from EDGAR's item numbers. 10-K/10-Q get a "what to
   read" hint only. Up to 40 filings per stock; documents cached 7 days.
+- Dashboard "누가 사고 누가 파나": US has no public retail net-buying data
+  (Vanda, Nasdaq RTAT, bank client flows are paid), and AAII's sentiment
+  survey blocks automated access (403; do not work around it). So: insider
+  open-market buys (P) vs sells (S) from Form 4, and FINRA margin debt as the
+  retail-mood proxy, labelled as such. Insider days are cached in
+  `data/insiders/days/`; first backfill of 6 weeks ≈ 25 min in a background
+  thread at server start. Baseline = SEC Insider Transactions Data Sets (last
+  4 published quarters, which lag by months).
 - "적자 성장주 점검" metrics: cash_runway (months; None when not burning cash),
   share_change_1y (diluted shares YoY), gross_margin_change (%p YoY). They need
   a full snapshot rebuild to appear in the screener.

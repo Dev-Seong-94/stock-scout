@@ -23,9 +23,9 @@ type Props = {
   ariaLabel: string;
 };
 
-const PAD = { top: 12, right: 52, bottom: 24, left: 8 };
+export const PAD = { top: 12, right: 52, bottom: 24, left: 8 };
 
-function niceTicks(min: number, max: number, count = 4): number[] {
+export function niceTicks(min: number, max: number, count = 4): number[] {
   const span = max - min || Math.abs(max) || 1;
   const raw = span / count;
   const mag = 10 ** Math.floor(Math.log10(raw));

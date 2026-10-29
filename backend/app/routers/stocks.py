@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app import screener
 from app.indicators import _clean, performance_since
+from app.industries import industry_ko
 from app.metrics import METRICS, SECTORS
 from app.services import market, news, sec
 from app.snapshot import build_row
@@ -52,6 +53,9 @@ def detail(symbol: str) -> dict:
         "sector": metrics.get("sector"),
         "sector_label": SECTORS.get(metrics.get("sector") or "", metrics.get("sector")),
         "industry": metrics.get("industry"),
+        "industry_label": industry_ko(metrics.get("industry"))[0],
+        "industry_about": industry_ko(metrics.get("industry"))[1],
+        "revenue": _clean(info.get("totalRevenue")),
         "summary": info.get("longBusinessSummary"),
         "website": info.get("website"),
         "employees": info.get("fullTimeEmployees"),
@@ -74,6 +78,7 @@ def history(symbol: str, range: str = Query("1y")) -> dict:
     if df.empty:
         raise HTTPException(404, "가격 데이터가 없어요.")
     close = df["Close"]
+    sma20 = close.rolling(20).mean()
     sma50 = close.rolling(50).mean()
     sma200 = close.rolling(200).mean() if interval == "1d" else close.rolling(40).mean()
     start = df.index.max() - pd.tseries.frequencies.to_offset(
@@ -88,11 +93,16 @@ def history(symbol: str, range: str = Query("1y")) -> dict:
         "symbol": symbol,
         "range": range,
         "dates": [d.strftime("%Y-%m-%d") for d in df.index[view]],
+        "open": pts(df["Open"]),
+        "high": pts(df["High"]),
+        "low": pts(df["Low"]),
         "close": pts(close),
         "volume": [int(v) if not pd.isna(v) else None for v in df["Volume"][view]],
         "sma_short": pts(sma50),
         "sma_long": pts(sma200),
+        "sma_fast": pts(sma20),
         "sma_labels": ["50일선", "200일선"] if interval == "1d" else ["50주선", "40주선(≈200일)"],
+        "sma_fast_label": "20일선" if interval == "1d" else "20주선",
     }
 
 

@@ -280,3 +280,45 @@ def test_8k_items_and_names():
     assert filing_summary.summarize_8k("9.01") is None  # exhibits only
     assert filing_summary.person_name("TETER TIMOTHY S.") == "Timothy S. Teter"
     assert filing_summary.person_name("VANGUARD GROUP INC") == "Vanguard Group Inc"
+
+
+def test_insider_weekly_counts_only_open_market_trades():
+    from app.services import insiders
+
+    tx = pd.DataFrame(
+        {
+            "accession": ["a", "a", "b", "c", "d", "e"],
+            "filed": ["2026-10-19", "2026-10-19", "2026-10-21", "2026-10-23", "2026-10-26", "2026-10-26"],
+            "ticker": ["X", "X", "Y", "X", "Z", "Z"],
+            "code": ["S", "S", "P", "F", "S", "G"],
+            "shares": [100.0, 50.0, 10.0, 999.0, 20.0, 5.0],
+            "price": [10.0, 12.0, 5.0, 10.0, 3.0, 0.0],
+        }
+    )
+    w = insiders.weekly(tx)
+    assert list(w["week"].dt.strftime("%Y-%m-%d")) == ["2026-10-19", "2026-10-26"]
+    first = w.iloc[0]
+    # Two sell rows in one filing count once; tax withholding (F) is not a sale.
+    assert (first.buy_filings, first.sell_filings, first.buy_value, first.sell_value) == (1, 1, 50.0, 1600.0)
+    assert w.iloc[1].sell_filings == 1 and w.iloc[1].buy_filings == 0
+    assert insiders.ratio(30, 4) == 7.5 and insiders.ratio(3, 0) is None
+    assert insiders.top_names(tx, "S")[0] == {"ticker": "X", "value": 1600, "filings": 1}
+
+
+def test_margin_summary():
+    from app.services import finra
+
+    months = pd.period_range("2020-01", "2026-09", freq="M").strftime("%Y-%m")
+    df = pd.DataFrame({"Year-Month": months[::-1], finra.DEBIT: [1000.0 + i for i in range(len(months))][::-1]})
+    m = finra.margin_summary(df)
+    assert m["as_of"] == "2026-09" and m["value"] == round((1000 + len(months) - 1) / 1000, 1)
+    assert m["change_1m"] == pytest.approx(round(100 / (1000 + len(months) - 2), 1))
+    assert m["low_5y"] <= m["value"] <= m["high_5y"]
+
+
+def test_industry_names_are_complete():
+    from app.industries import INDUSTRIES, industry_ko
+
+    assert all(ko and about.endswith("요.") for ko, about in INDUSTRIES.values())
+    assert industry_ko("Semiconductors")[0] == "반도체"
+    assert industry_ko("Something New") == (None, None)

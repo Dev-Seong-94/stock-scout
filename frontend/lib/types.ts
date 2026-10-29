@@ -117,6 +117,9 @@ export type StockDetail = {
   sector: string | null;
   sector_label: string | null;
   industry: string | null;
+  industry_label: string | null; // Korean name of the Yahoo industry
+  industry_about: string | null; // what companies in it do
+  revenue: number | null; // trailing 12 months, USD
   summary: string | null;
   website: string | null;
   employees: number | null;
@@ -155,10 +158,15 @@ export type PriceHistory = {
   symbol: string;
   range: string;
   dates: string[];
+  open: (number | null)[];
+  high: (number | null)[];
+  low: (number | null)[];
   close: (number | null)[];
   volume: (number | null)[];
+  sma_fast: (number | null)[];
   sma_short: (number | null)[];
   sma_long: (number | null)[];
+  sma_fast_label: string;
   sma_labels: [string, string];
 };
 
@@ -202,4 +210,43 @@ export type WatchItem = {
   priceAtAdd?: number | null;
   reason: string;
   memo: string;
+};
+
+export type InsiderWeek = {
+  week: string; // Monday
+  partial: boolean;
+  buy_filings: number;
+  sell_filings: number;
+  buy_value: number;
+  sell_value: number;
+  ratio: number | null; // sell filings ÷ buy filings
+};
+
+export type InsiderName = { ticker: string; name: string | null; value: number; filings: number };
+
+export type InsiderFlow = {
+  status: { running: boolean; done: number; total: number; error: string | null };
+  weeks: InsiderWeek[];
+  baseline: {
+    since: string;
+    until: string;
+    weeks: number;
+    buy_filings: number;
+    sell_filings: number;
+    buy_value: number;
+    sell_value: number;
+    ratio: number | null;
+  } | null;
+  top_sells: InsiderName[];
+  top_buys: InsiderName[];
+};
+
+export type MarginDebt = {
+  as_of: string;
+  value: number; // $B
+  change_1m: number | null;
+  change_1y: number | null;
+  low_5y: number;
+  high_5y: number;
+  points: [string, number][];
 };

@@ -1557,6 +1557,10 @@ textarea {
   line-height: 1.4;
 }
 
+.filters__plain {
+  color: var(--accent);
+}
+
 .checklist ul {
   margin: 0.375rem 0 0;
   padding-left: 1.125rem;
@@ -1595,4 +1599,127 @@ textarea {
   opacity: 0.45;
   transition: opacity 0.15s ease 0.1s; /* skip the flash when the answer is instant */
   pointer-events: none;
+}
+
+/* ── Who is buying / selling (dashboard) ── */
+.flows {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .flows {
+    grid-template-columns: 1fr;
+  }
+}
+
+.flow-lead {
+  margin-bottom: 0.25rem;
+  font-size: 15px;
+}
+
+.flow-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.flow-names {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 14px;
+}
+
+.flow-names li {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.flow-names__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.flow-names__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.margin-spark {
+  margin-top: 0.75rem;
+}
+
+.margin-spark svg {
+  width: 100%;
+  height: auto;
+}
+
+/* ── Candlestick chart ── */
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chart__ohlc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.875rem;
+  margin-bottom: 0.375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.candle-help {
+  margin-top: 0.5rem;
+}
+
+.candle-help summary {
+  cursor: pointer;
+}
+
+.candle-help p {
+  margin-top: 0.375rem;
+  line-height: 1.5;
+}
+
+/* ── Stock page: what the company does ── */
+.profile__facts {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.profile__facts > div {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.profile__facts dt {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.profile__about {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.profile__summary {
+  margin-top: 0.875rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.profile__summary p[lang="en"] {
+  line-height: 1.6;
+  margin-bottom: 0.375rem;
+}
+
+.profile__summary a {
+  margin-left: 0.5rem;
 }

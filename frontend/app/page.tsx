@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Sparkline, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { dayLabel, num, relativeTime, signed } from "@/lib/format";
-import type { Article, CalendarEvent, FearGreed, Indicator, IndicatorsResponse, SectorRow } from "@/lib/types";
+import type { Article, CalendarEvent, FearGreed, Indicator, IndicatorsResponse, InsiderFlow, InsiderName, MarginDebt, SectorRow } from "@/lib/types";
 
 function percentileText(p: number | null | undefined) {
   if (p === null || p === undefined) return "";
@@ -157,6 +157,190 @@ function Sectors() {
   );
 }
 
+function usd(v: number) {
+  if (v >= 1e9) return `$${num(v / 1e9, 1)}B`;
+  if (v >= 1e6) return `$${num(v / 1e6, 1)}M`;
+  if (v >= 1e3) return `$${num(v / 1e3, 0)}K`;
+  return `$${num(v, 0)}`;
+}
+
+/** "평소보다 매도 비중이 높아요" when the ratio is clearly above or below the usual week. */
+function compareRatio(ratio: number | null, usual: number | null | undefined) {
+  if (ratio === null || !usual) return "";
+  const diff = ratio / usual - 1;
+  if (diff > 0.25) return "평소보다 매도 쪽으로 기울어 있어요.";
+  if (diff < -0.25) return "평소보다 매수 비중이 높은 편이에요.";
+  return "평소와 비슷한 수준이에요.";
+}
+
+function NameList({ title, rows }: { title: string; rows: InsiderName[] }) {
+  return (
+    <div>
+      <h3 className="sub">{title}</h3>
+      {rows.length ? (
+        <ol className="flow-names">
+          {rows.map((r) => (
+            <li key={r.ticker}>
+              <Link href={`/stocks/${r.ticker}`} className="ticker">
+                {r.ticker}
+              </Link>
+              <span className="muted small flow-names__name">{r.name}</span>
+              <span className="flow-names__value">{usd(r.value)}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="small muted">최근 7일 기록이 없어요.</p>
+      )}
+    </div>
+  );
+}
+
+function InsiderPanel() {
+  const { data, error, loading, reload } = useApi<InsiderFlow>("/api/dashboard/insiders");
+  const running = !!data?.status.running;
+  // While the server is still collecting filings, check back now and then.
+  useEffect(() => {
+    if (!running) return;
+    const t = window.setInterval(reload, 15000);
+    return () => window.clearInterval(t);
+  }, [running, reload]);
+
+  const weeks = data?.weeks ?? [];
+  const lastFull = [...weeks].reverse().find((w) => !w.partial);
+  const base = data?.baseline;
+
+  return (
+    <section className="panel" aria-labelledby="insiders-title">
+      <div className="panel__head">
+        <h2 id="insiders-title">내부자 매매 (임원·이사·대주주)</h2>
+        <InfoTip
+          metric={{
+            label: "내부자 매매",
+            description: "미국 상장사 임원·이사·10% 대주주는 자기 회사 주식을 사고팔면 2영업일 안에 SEC에 Form 4를 내야 해요. 그걸 매주 모은 거예요.",
+            reading: "주식 보상, 세금 납부용 반납, 증여는 빼고 시장에서 직접 사고판 것만 셌어요. 매도÷매수 배수가 평소보다 높으면 내부자들이 평소보다 많이 팔고 있다는 뜻이에요.",
+            caveat: "내부자는 보상으로 받은 주식을 계속 팔기 때문에 평소에도 매도가 매수의 몇 배예요. 매도는 세금·분산 같은 개인 사정일 때가 많고, 매수가 더 드문 신호예요. 스크리너 종목 기준이에요.",
+          }}
+        />
+      </div>
+      <div className="panel__body">
+        {error ? <ErrorNote message={error} onRetry={reload} /> : null}
+        {loading && !data ? <Skeleton height={200} /> : null}
+        {running ? (
+          <p className="note small">
+            SEC에서 최근 6주 공시를 모으는 중이에요 ({data!.status.done.toLocaleString()}/{data!.status.total.toLocaleString()}건 확인). 처음 한 번은 20–30분쯤
+            걸리고, 그다음부터는 새로 나온 날만 받아요.
+          </p>
+        ) : null}
+        {data?.status.error ? <p className="note small">{data.status.error}</p> : null}
+
+        {lastFull ? (
+          <p className="flow-lead">
+            지난주(<span className="num">{lastFull.week.slice(5)}~</span>) 내부자 매도 <b>{lastFull.sell_filings}건</b> · 매수 <b>{lastFull.buy_filings}건</b>
+            {lastFull.ratio !== null ? ` (매도가 매수의 ${lastFull.ratio}배)` : ""}. {compareRatio(lastFull.ratio, base?.ratio)}
+          </p>
+        ) : null}
+        {base ? (
+          <p className="small muted">
+            평소({base.since.slice(0, 7)} ~ {base.until.slice(0, 7)} 주평균): 매도 {Math.round(base.sell_filings)}건 · 매수 {Math.round(base.buy_filings)}건
+            {base.ratio !== null ? ` (${base.ratio}배)` : ""} · 매도 {usd(base.sell_value)} · 매수 {usd(base.buy_value)}
+          </p>
+        ) : null}
+
+        {weeks.length ? (
+          <div className="table-wrap" style={{ marginTop: 12 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th className="left">주</th>
+                  <th>매수 건수</th>
+                  <th>매도 건수</th>
+                  <th>매도÷매수</th>
+                  <th>매수 금액</th>
+                  <th>매도 금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...weeks].reverse().map((w) => (
+                  <tr key={w.week}>
+                    <td className="left">
+                      {w.week.slice(5)}~{w.partial ? <span className="muted small"> 진행 중</span> : null}
+                    </td>
+                    <td>{w.buy_filings}</td>
+                    <td>{w.sell_filings}</td>
+                    <td>{w.ratio !== null ? `${w.ratio}배` : "–"}</td>
+                    <td>{usd(w.buy_value)}</td>
+                    <td>{usd(w.sell_value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {data && (data.top_sells.length || data.top_buys.length) ? (
+          <div className="flow-lists">
+            <NameList title="최근 7일 많이 판 종목" rows={data.top_sells} />
+            <NameList title="최근 7일 많이 산 종목" rows={data.top_buys} />
+          </div>
+        ) : null}
+        <p className="small muted" style={{ marginTop: 10 }}>
+          출처: SEC EDGAR Form 4. 공시일 기준으로 묶었어요.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function MarginPanel() {
+  const { data, error, loading, reload } = useApi<MarginDebt>("/api/dashboard/margin");
+  const fmt = (v: number) => (v >= 1000 ? `$${num(v / 1000, 2)}T` : `$${num(v, 0)}B`);
+  return (
+    <section className="panel" aria-labelledby="margin-title">
+      <div className="panel__head">
+        <h2 id="margin-title">개인 투자 분위기: 신용거래 잔고</h2>
+        <InfoTip
+          metric={{
+            label: "신용거래 잔고",
+            description: "투자자들이 증권사에서 돈을 빌려 주식을 산 금액의 합계예요(이른바 빚투). FINRA가 매달 발표해요.",
+            reading: "빠르게 늘면 빚을 내서라도 사려는 낙관이 커지고 있다는 뜻이고, 줄면 위험을 줄이고 있다는 뜻이에요.",
+            caveat: "개인만이 아니라 헤지펀드 등도 포함돼요. 한 달쯤 늦게 나오고, 주가가 오르면 잔고도 같이 커지는 경향이 있어요. 개인 '심리 설문'은 아니에요.",
+          }}
+        />
+      </div>
+      <div className="panel__body">
+        {error ? <ErrorNote message={error} onRetry={reload} /> : null}
+        {loading ? <Skeleton height={140} /> : null}
+        {data ? (
+          <>
+            <p className="ind__value">
+              {fmt(data.value)} <span className="small muted">{data.as_of} 기준</span>
+            </p>
+            <p className="small">
+              전월 대비 <Change value={data.change_1m} digits={1} /> · 1년 전 대비 <Change value={data.change_1y} digits={1} />
+            </p>
+            <RangeBar
+              low={data.low_5y}
+              high={data.high_5y}
+              value={data.value}
+              middle={data.value >= data.high_5y ? "5년 중 최고" : "5년 범위"}
+              label="신용거래 잔고 5년 범위"
+              format={fmt}
+            />
+            <div className="margin-spark">
+              <Sparkline values={data.points.map((p) => p[1])} width={320} height={56} />
+              <p className="small muted">최근 10년 ({data.points[0][0]} ~ {data.as_of})</p>
+            </div>
+            <p className="small muted" style={{ marginTop: 10 }}>
+              미국은 개인 순매수 금액을 공개하지 않아요. 개인 매매 데이터는 유료라서, 공식 무료 데이터 중 개인 투자 분위기를 가장 잘 보여주는 이 지표를 대신 보여줘요. 출처: FINRA.
+            </p>
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 const KIND_LABEL = { fomc: "FOMC", economic: "지표", earnings: "실적" } as const;
 
 function ThisWeek() {
@@ -263,6 +447,14 @@ export default function Dashboard() {
       <div className="grid dash-lower">
         <Sectors />
         <ThisWeek />
+      </div>
+
+      <div className="section-head">
+        <h2>누가 사고 누가 파나</h2>
+      </div>
+      <div className="grid flows">
+        <InsiderPanel />
+        <MarginPanel />
       </div>
 
       <p className="disclaimer">

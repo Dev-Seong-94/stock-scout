@@ -122,22 +122,42 @@ def _role(owner: ET.Element | None) -> str:
     return ", ".join(roles)
 
 
-def summarize_form4(xml: str) -> dict | None:
-    """{'text', 'note', 'kind'}: who did what, how much, and what it means."""
+def parse_form4(xml: str) -> dict | None:
+    """The structured parts of a Form 4: issuer ticker, who, role, 10b5-1 plan,
+    and its transactions as (code, shares, price per share)."""
     try:
         root = _strip_ns(ET.fromstring(xml))
     except ET.ParseError:
         return None
     owner = root.find("reportingOwner")
-    name = person_name(_text(owner, "reportingOwnerId/rptOwnerName"))
-    role = _role(owner)
+    rows = root.findall("nonDerivativeTable/nonDerivativeTransaction") or root.findall("derivativeTable/derivativeTransaction")
+    txs = []
+    for tx in rows:
+        txs.append(
+            (
+                _text(tx, "transactionCoding/transactionCode"),
+                _num(_text(tx, "transactionAmounts/transactionShares/value")) or 0.0,
+                _num(_text(tx, "transactionAmounts/transactionPricePerShare/value")) or 0.0,
+            )
+        )
+    return {
+        "ticker": _text(root, "issuer/issuerTradingSymbol").upper(),
+        "owner": person_name(_text(owner, "reportingOwnerId/rptOwnerName")),
+        "role": _role(owner),
+        "plan": _text(root, "aff10b5One") in ("1", "true"),
+        "txs": txs,
+    }
+
+
+def summarize_form4(xml: str) -> dict | None:
+    """{'text', 'note', 'kind'}: who did what, how much, and what it means."""
+    parsed = parse_form4(xml)
+    if parsed is None:
+        return None
+    name, role = parsed["owner"], parsed["role"]
 
     totals: dict[str, list[float]] = {}  # code → [shares, value, priced shares]
-    rows = root.findall("nonDerivativeTable/nonDerivativeTransaction") or root.findall("derivativeTable/derivativeTransaction")
-    for tx in rows:
-        code = _text(tx, "transactionCoding/transactionCode")
-        shares = _num(_text(tx, "transactionAmounts/transactionShares/value")) or 0.0
-        price = _num(_text(tx, "transactionAmounts/transactionPricePerShare/value")) or 0.0
+    for code, shares, price in parsed["txs"]:
         t = totals.setdefault(code, [0.0, 0.0, 0.0])
         t[0] += shares
         if price > 0:
@@ -158,7 +178,7 @@ def summarize_form4(xml: str) -> dict | None:
         parts.append(piece)
     lead = order[0]
     note = TX_CODES.get(lead, ("", ""))[1]
-    if _text(root, "aff10b5One") in ("1", "true") and lead in ("S", "P", "G"):
+    if parsed["plan"] and lead in ("S", "P", "G"):
         note += " 미리 정해 둔 매매 계획(10b5-1)에 따른 거래예요."
     who = f"{name} ({role})" if role else name
     return {

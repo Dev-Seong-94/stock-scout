@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import dashboard, macro, screener, stocks
+from app.services import insiders
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 # httpx logs every request URL at INFO, which would print API keys.
@@ -24,6 +25,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 async def lifespan(_app: FastAPI):
     if settings.fred_api_key:
         threading.Thread(target=macro.warm, daemon=True).start()
+    if settings.sec_user_agent:
+        threading.Thread(target=insiders.update, daemon=True).start()
     yield
 
 
