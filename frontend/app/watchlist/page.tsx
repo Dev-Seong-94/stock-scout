@@ -5,9 +5,9 @@ import { useRef, useState } from "react";
 
 import { Change, ErrorNote } from "@/components/ui";
 import { useApi } from "@/lib/api";
-import { price, shortDate } from "@/lib/format";
+import { price, shortDate, signed } from "@/lib/format";
 import { useWatchlist } from "@/lib/storage";
-import type { Quote, WatchItem } from "@/lib/types";
+import type { Performance, Quote, WatchItem } from "@/lib/types";
 
 function AddForm({ onAdd }: { onAdd: (symbol: string) => void }) {
   const [value, setValue] = useState("");
@@ -31,8 +31,50 @@ function AddForm({ onAdd }: { onAdd: (symbol: string) => void }) {
   );
 }
 
-function Row({ item, quote, onChange, onRemove }: { item: WatchItem; quote?: Quote; onChange: (p: Partial<WatchItem>) => void; onRemove: () => void }) {
-  const since = quote?.price && item.priceAtAdd ? (quote.price / item.priceAtAdd - 1) * 100 : null;
+/** Looking back: did the stocks I picked do better than just holding the S&P 500? */
+function Review({ perf }: { perf: Performance[] }) {
+  const done = perf.filter((p) => p.excess_pct != null);
+  if (!done.length) return null;
+  const beat = done.filter((p) => (p.excess_pct as number) > 0).length;
+  const avg = done.reduce((s, p) => s + (p.excess_pct as number), 0) / done.length;
+  return (
+    <section className="panel" aria-labelledby="review-title">
+      <div className="panel__head">
+        <h2 id="review-title">복기</h2>
+      </div>
+      <div className="panel__body">
+        <p className="watch-summary">
+          <span>
+            {done.length}개 중 <b>{beat}개</b>가 같은 기간 S&amp;P 500보다 잘했어요
+          </span>
+          <span>
+            평균 차이 <Change value={avg} digits={1} suffix="%p" />
+          </span>
+        </p>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          각 종목을 추가한 날부터 오늘까지를 S&amp;P 500(SPY)과 비교했어요. 결과보다 &apos;관심 사유&apos;가 맞았는지를 같이 돌아보면 더 많이 배울 수 있어요.
+          {done.length < 5 ? " 종목 수가 적고 기간이 짧으면 운의 영향이 커요." : ""}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function Row({
+  item,
+  quote,
+  perf,
+  onChange,
+  onRemove,
+}: {
+  item: WatchItem;
+  quote?: Quote;
+  perf?: Performance;
+  onChange: (p: Partial<WatchItem>) => void;
+  onRemove: () => void;
+}) {
+  const since = perf?.change_pct ?? (quote?.price && item.priceAtAdd ? (quote.price / item.priceAtAdd - 1) * 100 : null);
+  const basePrice = perf?.base_price ?? item.priceAtAdd;
   return (
     <li className="panel watch-item">
       <div className="watch-item__head">
@@ -47,9 +89,16 @@ function Row({ item, quote, onChange, onRemove }: { item: WatchItem; quote?: Quo
           <span>
             오늘 <Change value={quote?.change_pct} />
           </span>
-          <span title={item.priceAtAdd ? `추가 당시 ${price(item.priceAtAdd)}` : undefined}>
+          <span title={basePrice ? `추가 당시 ${price(basePrice)}` : undefined}>
             추가 후 <Change value={since} digits={1} />
           </span>
+          {perf?.benchmark_pct != null ? (
+            <span className="muted" title={`같은 기간 S&P 500(SPY) ${signed(perf.benchmark_pct, 1, "%")}`}>
+              S&amp;P 500 대비 <Change value={perf.excess_pct} digits={1} suffix="%p" />
+            </span>
+          ) : perf && !perf.base_date ? (
+            <span className="muted">비교는 다음 거래일부터</span>
+          ) : null}
           <span className="muted">{shortDate(item.addedAt)} 추가</span>
           <button type="button" className="btn btn--ghost small" onClick={onRemove}>
             삭제
@@ -88,6 +137,10 @@ export default function WatchlistPage() {
   const symbols = watch.items.map((i) => i.symbol).join(",");
   const quotes = useApi<{ quotes: Quote[] }>(symbols ? `/api/quotes?symbols=${encodeURIComponent(symbols)}` : null);
   const bySymbol = new Map((quotes.data?.quotes ?? []).map((q) => [q.symbol, q]));
+  const since = watch.items.map((i) => `${i.symbol}:${i.addedAt.slice(0, 10)}`).join(",");
+  const perfReq = useApi<{ items: Performance[] }>(since ? `/api/performance?items=${encodeURIComponent(since)}` : null);
+  const perf = perfReq.data?.items ?? [];
+  const perfBySymbol = new Map(perf.map((p) => [p.symbol, p]));
 
   const exportJson = () => {
     const blob = new Blob([JSON.stringify(watch.items, null, 2)], { type: "application/json" });
@@ -136,6 +189,8 @@ export default function WatchlistPage() {
       {importError ? <ErrorNote message={importError} /> : null}
       {quotes.error ? <ErrorNote message={quotes.error} onRetry={quotes.reload} /> : null}
 
+      {watch.items.length ? <Review perf={perf} /> : null}
+
       {watch.items.length ? (
         <ul className="watch-list">
           {watch.items.map((item) => (
@@ -143,6 +198,7 @@ export default function WatchlistPage() {
               key={item.symbol}
               item={item}
               quote={bySymbol.get(item.symbol)}
+              perf={perfBySymbol.get(item.symbol)}
               onChange={(p) => watch.update(item.symbol, p)}
               onRemove={() => watch.remove(item.symbol)}
             />

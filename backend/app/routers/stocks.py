@@ -6,10 +6,11 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
 from app import screener
-from app.indicators import _clean
+from app.indicators import _clean, performance_since
 from app.metrics import METRICS, SECTORS
 from app.services import market, news, sec
 from app.snapshot import build_row
+from app.valuation import valuation_ranges
 
 router = APIRouter(prefix="/api", tags=["stocks"])
 
@@ -41,7 +42,7 @@ def detail(symbol: str) -> dict:
     if peers is not None and len(peers) >= 5:
         for m in METRICS:
             if m.key in peers:
-                col = pd.to_numeric(peers[m.key], errors="coerce").dropna()
+                col = screener.usable(peers, m.key).dropna()
                 if len(col) >= 5:
                     medians[m.key] = round(float(col.median()), 2)
 
@@ -59,6 +60,7 @@ def detail(symbol: str) -> dict:
         "change_pct": _clean(info.get("regularMarketChangePercent")),
         "metrics": {m.key: metrics.get(m.key) for m in METRICS},
         "sector_median": medians,
+        "sector_percentile": screener.sector_percentiles(symbol),
         "peer_count": int(len(peers)) if peers is not None else 0,
     }
 
@@ -92,6 +94,16 @@ def history(symbol: str, range: str = Query("1y")) -> dict:
         "sma_long": pts(sma200),
         "sma_labels": ["50일선", "200일선"] if interval == "1d" else ["50주선", "40주선(≈200일)"],
     }
+
+
+@router.get("/stocks/{symbol}/valuation")
+def valuation(symbol: str) -> dict:
+    """PER/PSR now vs this stock's own past few years."""
+    symbol = _check(symbol)
+    hist = market.history(symbol, period="5y", interval="1wk")
+    if hist.empty:
+        raise HTTPException(404, "가격 데이터가 없어요.")
+    return valuation_ranges(hist["Close"], market.annual_income(symbol))
 
 
 @router.get("/stocks/{symbol}/ownership")
@@ -141,6 +153,37 @@ def filings(symbol: str) -> dict:
 def quotes(symbols: str) -> dict:
     wanted = [_check(s.strip()) for s in symbols.split(",") if s.strip()][:100]
     return {"quotes": market.quotes(wanted)}
+
+
+BENCHMARK = "SPY"
+
+
+@router.get("/performance")
+def performance(items: str) -> dict:
+    """items = "AAPL:2026-01-05,MSFT:2026-03-01": return since each date vs the S&P 500 (SPY)."""
+    wanted: list[tuple[str, pd.Timestamp]] = []
+    for part in items.split(",")[:100]:
+        sym, _, day = part.strip().partition(":")
+        if not sym:
+            continue
+        try:
+            since = pd.Timestamp(day[:10]).normalize()
+        except ValueError:
+            raise HTTPException(400, "날짜 형식이 올바르지 않아요.") from None
+        wanted.append((_check(sym), since))
+    if not wanted:
+        return {"benchmark": BENCHMARK, "items": []}
+    days = (pd.Timestamp.today() - min(d for _, d in wanted)).days
+    period = next(p for limit, p in [(330, "1y"), (700, "2y"), (1800, "5y"), (10**6, "max")] if days <= limit)
+    symbols = tuple(sorted({s for s, _ in wanted} | {BENCHMARK}))
+    df = market.closes(symbols, period=period)
+    out = []
+    for sym, since in wanted:
+        result = None
+        if not df.empty and sym in df and BENCHMARK in df:
+            result = performance_since(df[sym], df[BENCHMARK], since)
+        out.append({"symbol": sym, "since": since.strftime("%Y-%m-%d"), **(result or {})})
+    return {"benchmark": BENCHMARK, "items": out}
 
 
 @router.get("/search")

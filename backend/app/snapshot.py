@@ -43,6 +43,11 @@ def fundamentals_from_info(info: dict) -> dict:
     dividend_rate = _clean(info.get("dividendRate"))
     avg_volume = _clean(info.get("averageVolume"))
     debt_to_equity = _clean(info.get("debtToEquity"))
+    net_margin = _pct(info.get("profitMargins"))
+    net_income, revenue = _clean(info.get("netIncomeToCommon")), _clean(info.get("totalRevenue"))
+    if net_margin == 0 and net_income and revenue:
+        # Yahoo reports deeply negative margins as 0; recompute them.
+        net_margin = net_income / revenue * 100
     return {
         "name": info.get("shortName") or info.get("longName"),
         "sector": info.get("sector"),
@@ -60,7 +65,7 @@ def fundamentals_from_info(info: dict) -> dict:
         "roa": _pct(info.get("returnOnAssets")),
         "gross_margin": _pct(info.get("grossMargins")),
         "operating_margin": _pct(info.get("operatingMargins")),
-        "net_margin": _pct(info.get("profitMargins")),
+        "net_margin": net_margin,
         "revenue_growth": _pct(info.get("revenueGrowth")),
         "earnings_growth": _pct(info.get("earningsGrowth")),
         # Yahoo reports D/E as a percentage (150 = 1.5x).
@@ -72,7 +77,19 @@ def fundamentals_from_info(info: dict) -> dict:
         "short_float": _pct(info.get("shortPercentOfFloat")),
         "insider_pct": _pct(info.get("heldPercentInsiders")),
         "institution_pct": _pct(info.get("heldPercentInstitutions")),
+        "cash_runway": cash_runway_months(
+            _clean(info.get("totalCash")), fcf, _clean(info.get("operatingCashflow"))
+        ),
     }
+
+
+def cash_runway_months(cash: float | None, fcf: float | None, operating_cf: float | None) -> float | None:
+    """Months of cash at the current burn. None when the company is not burning
+    cash. Uses whichever of FCF / operating cash flow burns more (conservative)."""
+    flows = [f for f in (fcf, operating_cf) if f is not None]
+    if cash is None or not flows or min(flows) >= 0:
+        return None
+    return cash / -min(flows) * 12
 
 
 def _row(df: pd.DataFrame, *names: str) -> pd.Series | None:
@@ -83,8 +100,9 @@ def _row(df: pd.DataFrame, *names: str) -> pd.Series | None:
 
 
 def financial_extras(income: pd.DataFrame) -> dict:
-    """Metrics that need multi-year statements: 3y revenue CAGR, interest coverage."""
-    out = {"revenue_cagr_3y": None, "interest_coverage": None}
+    """Metrics that need multi-year statements: 3y revenue CAGR, interest
+    coverage, share count change and gross margin change (newest vs prior year)."""
+    out = {"revenue_cagr_3y": None, "interest_coverage": None, "share_change_1y": None, "gross_margin_change": None}
     if income is None or income.empty:
         return out
     income = income.reindex(sorted(income.columns, reverse=True), axis=1)  # newest first
@@ -97,6 +115,16 @@ def financial_extras(income: pd.DataFrame) -> dict:
         expense = abs(float(interest.iloc[0]))
         if expense > 0:
             out["interest_coverage"] = _clean(float(ebit.iloc[0]) / expense)
+    shares = _row(income, "Diluted Average Shares", "Basic Average Shares")
+    if shares is not None and len(shares) >= 2 and shares.iloc[1] > 0:
+        out["share_change_1y"] = _clean((shares.iloc[0] / shares.iloc[1] - 1) * 100)
+    gross = _row(income, "Gross Profit")
+    if gross is not None and revenue is not None and len(gross) >= 2 and len(revenue) >= 2:
+        both = pd.concat([gross, revenue], axis=1, keys=["g", "r"]).dropna()
+        both = both[both["r"] > 0].sort_index(ascending=False)
+        if len(both) >= 2:
+            margins = both["g"] / both["r"] * 100
+            out["gross_margin_change"] = _clean(margins.iloc[0] - margins.iloc[1])
     return out
 
 

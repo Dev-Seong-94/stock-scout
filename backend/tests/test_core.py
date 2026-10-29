@@ -7,10 +7,11 @@ import pandas as pd
 import pytest
 
 from app import indicators as ind
-from app.metrics import METRICS, METRIC_KEYS, PRESETS
+from app.metrics import METRICS, METRIC_KEYS, PRESETS, SECTOR_SUFFIX
 from app.regime import read_regime
-from app.screener import apply_filters
-from app.snapshot import build_row, financial_extras, fundamentals_from_info
+from app.screener import apply_filters, with_sector_percentiles
+from app.snapshot import build_row, cash_runway_months, financial_extras, fundamentals_from_info
+from app.valuation import valuation_ranges
 
 
 def prices(values) -> pd.Series:
@@ -105,7 +106,10 @@ def test_catalog_consistency():
     for m in METRICS:
         assert m.slider_min < m.slider_max and m.description and m.label
     for preset in PRESETS:
-        assert set(preset["filters"]) <= METRIC_KEYS
+        assert {k.removesuffix(SECTOR_SUFFIX) for k in preset["filters"]} <= METRIC_KEYS
+        for key, (lo, hi) in preset["filters"].items():
+            if key.endswith(SECTOR_SUFFIX):
+                assert all(v is None or 0 <= v <= 100 for v in (lo, hi))
 
 
 def test_regime_reads_inversion_and_stress():
@@ -144,3 +148,80 @@ def test_pick_constituents_header_in_first_row():
     rows = [["Ticker", "Company", "ICB Industry"]] + [[f"T{i}", f"Co {i}", "Tech"] for i in range(101)]
     out = pick_constituents([pd.DataFrame(rows)])
     assert len(out) == 101 and out["ticker"].iloc[0] == "T0"
+
+
+def test_net_margin_recomputed_when_yahoo_reports_zero():
+    f = fundamentals_from_info({"profitMargins": 0.0, "netIncomeToCommon": -50.0, "totalRevenue": 200.0})
+    assert f["net_margin"] == pytest.approx(-25.0)
+    assert fundamentals_from_info({"profitMargins": 0.0})["net_margin"] == 0.0
+
+
+def test_cash_runway():
+    assert cash_runway_months(1200.0, -600.0, -300.0) == pytest.approx(24.0)  # worse burn wins
+    assert cash_runway_months(1200.0, None, -1200.0) == pytest.approx(12.0)
+    assert cash_runway_months(1200.0, 100.0, 50.0) is None  # not burning cash
+    assert cash_runway_months(None, -100.0, None) is None
+
+
+def test_share_and_gross_margin_change():
+    cols = pd.to_datetime(["2025-12-31", "2024-12-31"])
+    income = pd.DataFrame(
+        [[110.0, 100.0], [200.0, 100.0], [100.0, 40.0]],
+        index=["Diluted Average Shares", "Total Revenue", "Gross Profit"],
+        columns=cols,
+    )
+    extras = financial_extras(income)
+    assert extras["share_change_1y"] == pytest.approx(10.0)
+    assert extras["gross_margin_change"] == pytest.approx(10.0)  # 50% vs 40%
+
+
+def test_positive_only_multiples_and_sector_percentiles():
+    df = pd.DataFrame(
+        {
+            "symbol": list("ABCDEFG"),
+            "name": list("abcdefg"),
+            "sector": ["Tech"] * 5 + ["Energy"] * 2,
+            "forward_pe": [10.0, 20.0, 30.0, 40.0, -5.0, 8.0, 9.0],
+            "roe": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+        }
+    )
+    # A negative forward PER is a loss, not "cheap": it must not pass a max filter.
+    assert list(apply_filters(df, {"forward_pe": [None, 15]})["symbol"]) == ["A", "F", "G"]
+
+    df = with_sector_percentiles(df)
+    # Only 4 usable Tech forward PERs (< 5 peers) → no percentile at all.
+    assert df["forward_pe@sector"].isna().all()
+    assert df.loc[df.symbol == "E", "roe@sector"].item() == pytest.approx(100.0)
+    assert df.loc[df.symbol == "A", "roe@sector"].item() == pytest.approx(20.0)
+    assert df.loc[df.symbol == "F", "roe@sector"].isna().item()  # Energy has 2 peers
+    assert list(apply_filters(df, {"roe@sector": [None, 40]})["symbol"]) == ["A", "B"]
+
+
+def test_valuation_ranges_use_published_annual_figures():
+    dates = pd.date_range("2022-01-07", "2025-12-26", freq="W-FRI")
+    close = pd.Series(100.0, index=dates)
+    fy = pd.to_datetime(["2021-12-31", "2022-12-31", "2023-12-31", "2024-12-31"])
+    income = pd.DataFrame(
+        [[5.0, 4.0, 2.0, -1.0], [1000.0, 800.0, 500.0, 400.0], [100.0, 100.0, 100.0, 100.0]],
+        index=["Diluted EPS", "Total Revenue", "Diluted Average Shares"],
+        columns=fy,  # FY2021 … FY2024, oldest first
+    )
+    out = valuation_ranges(close, income)
+    pe = out["pe"]
+    # EPS goes 5 → 4 → 2 → −1: PER 20 → 25 → 50, then a loss year has no PER.
+    assert pe["low"] == pytest.approx(20.0) and pe["high"] == pytest.approx(50.0)
+    assert pe["current"] is None and pe["percentile"] is None
+    ps = out["ps"]
+    assert ps["current"] == pytest.approx(100 / 4.0)  # FY2024 sales/share = 400/100
+    assert ps["low"] == pytest.approx(10.0)
+    assert valuation_ranges(close, pd.DataFrame()) == {"pe": None, "ps": None}
+
+
+def test_performance_since():
+    idx = pd.bdate_range("2026-01-01", periods=5)
+    stock = pd.Series([10, 11, 12, 13, 15], index=idx, dtype=float)
+    spy = pd.Series([100, 100, 101, 102, 110], index=idx, dtype=float)
+    r = ind.performance_since(stock, spy, pd.Timestamp("2026-01-02"))
+    assert r["base_price"] == 11 and r["change_pct"] == pytest.approx(15 / 11 * 100 - 100)
+    assert r["excess_pct"] == pytest.approx(r["change_pct"] - 10.0)
+    assert ind.performance_since(stock, spy, pd.Timestamp("2026-02-01")) is None

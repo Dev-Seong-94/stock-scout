@@ -2,8 +2,40 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
-import { direction, signed } from "@/lib/format";
+import { direction, num, signed } from "@/lib/format";
 import type { Metric } from "@/lib/types";
+
+/** Where a value sits between a low and a high (the dashboard's 5-year bar). */
+export function RangeBar({
+  low,
+  high,
+  value,
+  middle,
+  label,
+  format = (v) => num(v, Math.abs(high) >= 100 ? 0 : 2),
+}: {
+  low: number;
+  high: number;
+  value: number;
+  middle: string;
+  label: string;
+  format?: (v: number) => string;
+}) {
+  const span = high - low || 1;
+  const pos = Math.min(100, Math.max(0, ((value - low) / span) * 100));
+  return (
+    <div className="range" aria-label={`${label} ${format(low)}–${format(high)}, ${middle}`}>
+      <div className="range__track">
+        <span className="range__mark" style={{ left: `${pos}%` }} />
+      </div>
+      <div className="range__labels">
+        <span>{format(low)}</span>
+        <span>{middle}</span>
+        <span>{format(high)}</span>
+      </div>
+    </div>
+  );
+}
 
 export function Change({
   value,

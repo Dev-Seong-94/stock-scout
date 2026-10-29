@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useState } from "react";
 
-import { Change, ErrorNote, InfoTip, Skeleton, Sparkline, Tabs } from "@/components/ui";
+import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Sparkline, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { dayLabel, num, relativeTime, signed } from "@/lib/format";
 import type { Article, CalendarEvent, FearGreed, Indicator, IndicatorsResponse, SectorRow } from "@/lib/types";
@@ -15,23 +15,9 @@ function percentileText(p: number | null | undefined) {
 }
 
 /** The signature element: where today's value sits inside its 5-year range. */
-function RangeBar({ ind }: { ind: Indicator }) {
+function IndicatorRange({ ind }: { ind: Indicator }) {
   if (ind.low_5y == null || ind.high_5y == null || ind.value == null) return null;
-  const span = ind.high_5y - ind.low_5y || 1;
-  const pos = Math.min(100, Math.max(0, ((ind.value - ind.low_5y) / span) * 100));
-  const digits = Math.abs(ind.high_5y) >= 100 ? 0 : 2;
-  return (
-    <div className="range" aria-label={`5년 범위 ${num(ind.low_5y, digits)}–${num(ind.high_5y, digits)}, ${percentileText(ind.percentile_5y)}`}>
-      <div className="range__track">
-        <span className="range__mark" style={{ left: `${pos}%` }} />
-      </div>
-      <div className="range__labels">
-        <span>{num(ind.low_5y, digits)}</span>
-        <span>{percentileText(ind.percentile_5y)}</span>
-        <span>{num(ind.high_5y, digits)}</span>
-      </div>
-    </div>
-  );
+  return <RangeBar low={ind.low_5y} high={ind.high_5y} value={ind.value} middle={percentileText(ind.percentile_5y)} label="5년 범위" />;
 }
 
 function IndicatorCard({ ind }: { ind: Indicator }) {
@@ -63,7 +49,7 @@ function IndicatorCard({ ind }: { ind: Indicator }) {
               1개월 <Change value={ind.change_1m} suffix={changeSuffix} />
             </span>
           </p>
-          <RangeBar ind={ind} />
+          <IndicatorRange ind={ind} />
         </>
       )}
     </article>

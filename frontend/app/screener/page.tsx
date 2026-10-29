@@ -6,36 +6,50 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ErrorNote, InfoTip, Skeleton, WatchStar } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { direction, metricValue, price, relativeTime, unitSuffix } from "@/lib/format";
+import { direction, metricCell, metricValue, price, relativeTime, unitSuffix } from "@/lib/format";
 import { useSavedPresets, useWatchlist } from "@/lib/storage";
+import { SECTOR_SUFFIX } from "@/lib/types";
 import type { Catalog, Filters, Metric, Preset, Range, ScreenResult } from "@/lib/types";
 
 const PAGE = 100;
 const DEFAULT_COLUMNS = ["market_cap", "pe", "roe", "revenue_growth", "rsi14", "ret_3m"];
 // Signed price moves get up/down colour; everything else stays neutral.
-const SIGNED = new Set(["ret_1m", "ret_3m", "ret_6m", "ret_1y", "dist_sma50", "dist_sma200", "from_52w_high"]);
+const SIGNED = new Set(["ret_1m", "ret_3m", "ret_6m", "ret_1y", "dist_sma50", "dist_sma200", "from_52w_high", "share_change_1y", "gross_margin_change"]);
+const STALE_DAYS = 3;
+
+const baseKey = (key: string) => (key.endsWith(SECTOR_SUFFIX) ? key.slice(0, -SECTOR_SUFFIX.length) : key);
+
+// Shown whenever a filter looks for stocks that fell a lot: the classic value trap.
+const FALLEN_CHECKLIST = [
+  "많이 빠진 종목은 이유가 있는 경우가 많아요. 최근 실적 발표·가이던스(공시의 8-K)와 뉴스를 먼저 확인하세요.",
+  "실적 전망이 계속 낮아지는 중이면 싸 보여도 더 싸질 수 있어요(가치 함정).",
+];
 
 function RangeInputs({
   metric,
   value,
+  sector,
   onChange,
 }: {
   metric: Metric;
   value: Range | undefined;
+  sector: boolean;
   onChange: (r: Range) => void;
 }) {
   const [lo, hi] = value ?? [null, null];
   const parse = (s: string) => (s.trim() === "" || s === "-" ? null : Number(s));
-  const suffix = unitSuffix(metric.unit);
+  const suffix = sector ? "%ile" : unitSuffix(metric.unit);
   return (
     <div className="range-inputs">
       <input
         className="input"
         type="number"
         inputMode="decimal"
-        step={metric.step}
-        aria-label={`${metric.label} 최소`}
-        placeholder="최소"
+        step={sector ? 5 : metric.step}
+        min={sector ? 0 : undefined}
+        max={sector ? 100 : undefined}
+        aria-label={`${metric.label} ${sector ? "섹터 백분위 " : ""}최소`}
+        placeholder={sector ? "0" : "최소"}
         value={lo ?? ""}
         onChange={(e) => onChange([parse(e.target.value), hi])}
       />
@@ -46,9 +60,11 @@ function RangeInputs({
         className="input"
         type="number"
         inputMode="decimal"
-        step={metric.step}
-        aria-label={`${metric.label} 최대`}
-        placeholder="최대"
+        step={sector ? 5 : metric.step}
+        min={sector ? 0 : undefined}
+        max={sector ? 100 : undefined}
+        aria-label={`${metric.label} ${sector ? "섹터 백분위 " : ""}최대`}
+        placeholder={sector ? "100" : "최대"}
         value={hi ?? ""}
         onChange={(e) => onChange([lo, parse(e.target.value)])}
       />
@@ -61,8 +77,13 @@ function isActive(r: Range | undefined) {
   return !!r && (r[0] !== null || r[1] !== null);
 }
 
-function describeRange(r: Range, m: Metric) {
+function describeRange(key: string, r: Range, m: Metric) {
   const [lo, hi] = r;
+  if (key.endsWith(SECTOR_SUFFIX)) {
+    if (lo !== null && hi !== null) return `섹터 내 ${lo}–${hi}%ile`;
+    if (lo !== null) return `섹터 상위 ${100 - lo}%`;
+    return `섹터 하위 ${hi}%`;
+  }
   if (lo !== null && hi !== null) return `${metricValue(lo, m.unit)} ~ ${metricValue(hi, m.unit)}`;
   if (lo !== null) return `${metricValue(lo, m.unit)} 이상`;
   return `${metricValue(hi, m.unit)} 이하`;
@@ -149,10 +170,16 @@ function Screener() {
   const [savingPreset, setSavingPreset] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ valuation: true });
   const [showFilters, setShowFilters] = useState(false); // only matters on narrow screens
+  const [sectorMode, setSectorMode] = useState<Record<string, boolean>>({});
+  const [presetChecklist, setPresetChecklist] = useState<{ name: string; items: string[] } | null>(null);
 
   const metricsByKey = useMemo(() => new Map((catalog?.metrics ?? []).map((m) => [m.key, m])), [catalog]);
   const activeKeys = Object.keys(filters).filter((k) => isActive(filters[k]));
-  const columns = useMemo(() => [...new Set([...activeKeys, ...DEFAULT_COLUMNS])].filter((k) => metricsByKey.has(k)), [activeKeys.join(), metricsByKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const columns = useMemo(() => [...new Set([...activeKeys.map(baseKey), ...DEFAULT_COLUMNS])].filter((k) => metricsByKey.has(k)), [activeKeys.join(), metricsByKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filteredColumns = new Set(activeKeys.map(baseKey));
+  // RSI capped low or price far below its high → looking at stocks that fell a lot.
+  const lookingAtFallen =
+    (filters.rsi14?.[1] ?? 100) <= 40 || (filters.from_52w_high?.[1] ?? 0) <= -20 || (filters.ret_3m?.[1] ?? 0) <= -15;
 
   // Search whenever conditions change (debounced while typing).
   useEffect(() => {
@@ -181,11 +208,25 @@ function Screener() {
     setFilters((f) => ({ ...f, [key]: r }));
   }, []);
 
+  const setMode = (key: string, sector: boolean) => {
+    // Values and percentiles mean different things, so switching clears the range.
+    setPage(0);
+    setFilters((f) => {
+      const next = { ...f };
+      delete next[key];
+      delete next[key + SECTOR_SUFFIX];
+      return next;
+    });
+    setSectorMode((m) => ({ ...m, [key]: sector }));
+  };
+
   const applyPreset = (p: Preset) => {
     setPage(0);
     setFilters(p.filters);
     setSectors(p.sectors ?? []);
-    const groups = new Set(Object.keys(p.filters).map((k) => metricsByKey.get(k)?.group));
+    setSectorMode(Object.fromEntries(Object.keys(p.filters).filter((k) => k.endsWith(SECTOR_SUFFIX)).map((k) => [baseKey(k), true])));
+    setPresetChecklist(p.checklist?.length ? { name: p.name, items: p.checklist } : null);
+    const groups = new Set(Object.keys(p.filters).map((k) => metricsByKey.get(baseKey(k))?.group));
     setOpenGroups(Object.fromEntries([...groups].filter(Boolean).map((g) => [g as string, true])));
   };
 
@@ -200,6 +241,8 @@ function Screener() {
 
   const reset = () => {
     setFilters({});
+    setSectorMode({});
+    setPresetChecklist(null);
     setSectors([]);
     setQuery("");
     setPage(0);
@@ -230,17 +273,28 @@ function Screener() {
 
   const presets: Preset[] = [...saved, ...catalog.presets.map((p) => ({ ...p, builtin: true }))];
   const sectorLabel = new Map(catalog.sectors.map((s) => [s.key, s.label]));
+  const builtAt = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
+  const staleDays = builtAt ? Math.floor((Date.now() - builtAt.getTime()) / 86400000) : 0;
+  const skipped = (result?.skipped ?? []).map((k) => metricsByKey.get(baseKey(k))?.label ?? k);
+  const checklist = presetChecklist?.items ?? (lookingAtFallen ? FALLEN_CHECKLIST : []);
 
   return (
     <>
       <div className="page-head">
         <h1>스크리너</h1>
-        {catalog.snapshot ? (
+        {builtAt && catalog.snapshot ? (
           <p className="small muted">
-            {catalog.snapshot.count.toLocaleString()}개 종목 · 데이터 {relativeTime(catalog.snapshot.built_at)} 기준
+            {catalog.snapshot.count.toLocaleString()}개 종목 · 데이터 {builtAt.toLocaleDateString("ko-KR")} ({relativeTime(catalog.snapshot.built_at)}) 기준
           </p>
         ) : null}
       </div>
+
+      {staleDays >= STALE_DAYS ? (
+        <p className="note small">
+          스크리너 데이터가 {staleDays}일 전 것이에요. 가격 지표(RSI, 수익률 등)가 지금과 다를 수 있어요. backend 폴더에서{" "}
+          <code>python -m scripts.build_snapshot</code>으로 새로 만들 수 있어요.
+        </p>
+      ) : null}
 
       {!catalog.snapshot ? <SnapshotMissing catalog={catalog} onBuilt={catalogReq.reload} /> : null}
 
@@ -348,7 +402,7 @@ function Screener() {
 
           {catalog.groups.map((g) => {
             const metrics = catalog.metrics.filter((m) => m.group === g.key);
-            const count = metrics.filter((m) => isActive(filters[m.key])).length;
+            const count = metrics.filter((m) => isActive(filters[m.key]) || isActive(filters[m.key + SECTOR_SUFFIX])).length;
             const open = openGroups[g.key] ?? count > 0;
             return (
               <div key={g.key} className="filters__group">
@@ -368,8 +422,10 @@ function Screener() {
                   <ul className="filters__list">
                     {metrics.map((m) => {
                       const d = catalog.distribution[m.key];
+                      const bySector = !!sectorMode[m.key];
+                      const key = bySector ? m.key + SECTOR_SUFFIX : m.key;
                       return (
-                        <li key={m.key} className={isActive(filters[m.key]) ? "is-active" : ""}>
+                        <li key={m.key} className={isActive(filters[key]) ? "is-active" : ""}>
                           <div className="filters__metric">
                             <span>{m.label}</span>
                             <InfoTip
@@ -386,9 +442,23 @@ function Screener() {
                                 ) : null
                               }
                             />
-                            {d ? <span className="filters__median small muted">중앙 {metricValue(d.p50, m.unit)}</span> : null}
+                            {d && !bySector ? <span className="filters__median small muted">중앙 {metricValue(d.p50, m.unit)}</span> : null}
+                            <button
+                              type="button"
+                              className="mode-toggle small"
+                              aria-pressed={bySector}
+                              title="같은 섹터 종목들 사이에서의 순위로 거르기 (0 = 가장 낮음, 100 = 가장 높음)"
+                              onClick={() => setMode(m.key, !bySector)}
+                            >
+                              섹터 비교
+                            </button>
                           </div>
-                          <RangeInputs metric={m} value={filters[m.key]} onChange={(r) => setRange(m.key, r)} />
+                          <RangeInputs metric={m} sector={bySector} value={filters[key]} onChange={(r) => setRange(key, r)} />
+                          {bySector ? (
+                            <p className="filters__hint small muted">
+                              같은 섹터 안 순위예요. 예: 최대 30 = {m.label} 낮은 쪽 30%, 최소 70 = 높은 쪽 30%.
+                            </p>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -436,10 +506,10 @@ function Screener() {
                 </span>
               ))}
               {activeKeys.map((k) => {
-                const m = metricsByKey.get(k);
+                const m = metricsByKey.get(baseKey(k));
                 return m ? (
                   <span key={k} className="chip">
-                    {m.label} {describeRange(filters[k], m)}
+                    {m.label} {describeRange(k, filters[k], m)}
                     <button type="button" aria-label={`${m.label} 조건 빼기`} onClick={() => setRange(k, [null, null])}>
                       ×
                     </button>
@@ -450,6 +520,26 @@ function Screener() {
           ) : null}
 
           {error ? <ErrorNote message={error} /> : null}
+
+          {skipped.length ? (
+            <p className="note small">
+              <b>{skipped.join(", ")}</b> 조건은 지금 데이터에 없어서 적용되지 않았어요. 새로 추가된 지표라 스냅샷을 다시 만들어야 해요 (backend 폴더에서{" "}
+              <code>python -m scripts.build_snapshot --fresh</code>).
+            </p>
+          ) : null}
+
+          {checklist.length ? (
+            <div className="note checklist">
+              <p className="small">
+                <b>{presetChecklist ? `'${presetChecklist.name}' 결과를 볼 때 확인할 것` : "많이 빠진 종목을 볼 때 확인할 것"}</b>
+              </p>
+              <ul className="small">
+                {checklist.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="panel table-wrap results__table">
             <table className="table">
@@ -500,9 +590,9 @@ function Screener() {
                     {columns.map((k) => (
                       <td
                         key={k}
-                        className={`${activeKeys.includes(k) ? "is-filtered" : ""} ${SIGNED.has(k) ? direction(r[k] as number | null) : ""}`.trim() || undefined}
+                        className={`${filteredColumns.has(k) ? "is-filtered" : ""} ${SIGNED.has(k) ? direction(r[k] as number | null) : ""}`.trim() || undefined}
                       >
-                        {metricValue(r[k] as number | null, metricsByKey.get(k)!.unit)}
+                        {metricCell(r[k] as number | null, metricsByKey.get(k)!)}
                       </td>
                     ))}
                     <td>
