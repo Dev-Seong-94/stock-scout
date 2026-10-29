@@ -104,7 +104,7 @@ export default function WatchlistPage() {
       const parsed = JSON.parse(await file.text());
       if (!Array.isArray(parsed) || !parsed.every((i) => typeof i?.symbol === "string")) throw new Error();
       const existing = new Set(watch.items.map((i) => i.symbol));
-      const incoming = (parsed as WatchItem[]).filter((i) => !existing.has(i.symbol));
+      const incoming = (parsed as (Partial<WatchItem> & { symbol: string })[]).filter((i) => !existing.has(i.symbol));
       watch.replaceAll([...watch.items, ...incoming.map((i) => ({ reason: "", memo: "", addedAt: new Date().toISOString(), ...i }))]);
     } catch {
       setImportError("관심종목 JSON 파일이 아니에요.");
