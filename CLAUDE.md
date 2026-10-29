@@ -27,6 +27,7 @@ Seong (Korean, lives in Japan, frontend lead by day). Talk to him in Korean.
 backend/   FastAPI (Python 3.11 venv in backend/.venv)
   app/metrics.py      38 metrics + Korean text, sectors, example presets (+ checklists)
   app/indicators.py   RSI, SMA distance, returns, volatility, CAGR, performance_since (pure, tested)
+  app/filing_summary.py  Form 4 / 144 / 8-K → Korean one-liners (pure, tested)
   app/valuation.py    a stock's PER/PSR vs its own past (annual statements, pure, tested)
   app/snapshot.py     daily batch → data/snapshot.parquet (+ snapshot_meta.json)
   app/screener.py     filters the snapshot in memory; adds "<metric>@sector" percentile columns
@@ -112,6 +113,10 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
 - Stock page "한눈에 보기" (`frontend/lib/notables.ts`) is fixed rules stating
   facts (losses, runway, dilution, sector extremes, price position), never a
   verdict, and ends by pointing to the 10-Q/8-K.
+- Filings tab summaries (`backend/app/filing_summary.py`, pure, tested):
+  Form 4 and 144 are parsed from their raw XML (the `xsl…/` path prefix is
+  the HTML rendering), 8-K from EDGAR's item numbers. 10-K/10-Q get a "what to
+  read" hint only. Up to 40 filings per stock; documents cached 7 days.
 - "적자 성장주 점검" metrics: cash_runway (months; None when not burning cash),
   share_change_1y (diluted shares YoY), gross_margin_change (%p YoY). They need
   a full snapshot rebuild to appear in the screener.

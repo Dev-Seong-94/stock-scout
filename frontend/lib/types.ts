@@ -171,7 +171,16 @@ export type Ownership = {
   institutional_holders: Record<string, string | number | null>[];
 };
 
-export type Filing = { form: string; label: string; date: string; description: string; url: string };
+export type FilingSummary = { text: string; note: string; kind: "buy" | "sell" | "other" };
+export type Filing = {
+  form: string;
+  label: string;
+  date: string;
+  description: string;
+  url: string;
+  summary: FilingSummary | null; // plain-Korean one-liner (Form 4, 144, 8-K)
+  help: string; // what this kind of filing is
+};
 
 export type MacroSeries = {
   id: string;

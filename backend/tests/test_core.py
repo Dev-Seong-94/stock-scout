@@ -9,7 +9,7 @@ import pytest
 from app import indicators as ind
 from app.metrics import METRICS, METRIC_KEYS, PRESETS, SECTOR_SUFFIX
 from app.regime import read_regime
-from app import screener
+from app import filing_summary, screener
 from app.screener import apply_filters, with_sector_percentiles
 from app.snapshot import build_row, cash_runway_months, financial_extras, fundamentals_from_info
 from app.valuation import valuation_ranges
@@ -251,3 +251,32 @@ def test_performance_since():
     assert r["base_price"] == 11 and r["change_pct"] == pytest.approx(15 / 11 * 100 - 100)
     assert r["excess_pct"] == pytest.approx(r["change_pct"] - 10.0)
     assert ind.performance_since(stock, spy, pd.Timestamp("2026-02-01")) is None
+
+
+FORM4 = """<?xml version="1.0"?><ownershipDocument>
+<reportingOwner><reportingOwnerId><rptOwnerName>KRESS COLETTE</rptOwnerName></reportingOwnerId>
+<reportingOwnerRelationship><isDirector>0</isDirector><isOfficer>1</isOfficer><officerTitle>CFO</officerTitle></reportingOwnerRelationship></reportingOwner>
+<aff10b5One>1</aff10b5One>
+<nonDerivativeTable>
+<nonDerivativeTransaction><transactionCoding><transactionCode>F</transactionCode></transactionCoding>
+<transactionAmounts><transactionShares><value>500</value></transactionShares><transactionPricePerShare><value>100</value></transactionPricePerShare></transactionAmounts></nonDerivativeTransaction>
+<nonDerivativeTransaction><transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+<transactionAmounts><transactionShares><value>1000</value></transactionShares><transactionPricePerShare><value>200</value></transactionPricePerShare></transactionAmounts></nonDerivativeTransaction>
+<nonDerivativeTransaction><transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+<transactionAmounts><transactionShares><value>1000</value></transactionShares><transactionPricePerShare><value>210</value></transactionPricePerShare></transactionAmounts></nonDerivativeTransaction>
+</nonDerivativeTable></ownershipDocument>"""
+
+
+def test_form4_summary():
+    s = filing_summary.summarize_form4(FORM4)
+    # Open-market sales lead even when listed second; shares and value are summed.
+    assert s["text"] == "Colette Kress (CFO) · 장내 매도 2,000주 (평균 $205.00, 약 $410K) · 세금용 주식 반납 500주"
+    assert s["kind"] == "sell" and "10b5-1" in s["note"]
+    assert filing_summary.summarize_form4("not xml") is None
+
+
+def test_8k_items_and_names():
+    assert filing_summary.summarize_8k("2.02,9.01")["text"] == "실적 발표"
+    assert filing_summary.summarize_8k("9.01") is None  # exhibits only
+    assert filing_summary.person_name("TETER TIMOTHY S.") == "Timothy S. Teter"
+    assert filing_summary.person_name("VANGUARD GROUP INC") == "Vanguard Group Inc"

@@ -312,44 +312,90 @@ function News({ symbol }: { symbol: string }) {
   );
 }
 
+type FilingView = "all" | "main" | "insider";
+const MAIN_FORMS = ["10-K", "10-Q", "8-K"];
+const INSIDER_FORMS = ["3", "4", "5", "144"];
+const baseForm = (form: string) => form.replace(/\/A$/, "");
+
 function Filings({ symbol }: { symbol: string }) {
   const { data, error, loading } = useApi<{ filings: Filing[] }>(`/api/stocks/${symbol}/filings`);
-  const [onlyMain, setOnlyMain] = useState(false);
+  const [view, setView] = useState<FilingView>("all");
   if (error) return <ErrorNote message={error} />;
   if (loading || !data) return <Skeleton height={200} />;
-  const rows = onlyMain ? data.filings.filter((f) => ["10-K", "10-Q", "8-K"].includes(f.form)) : data.filings;
+  const rows = data.filings.filter((f) =>
+    view === "main" ? MAIN_FORMS.includes(baseForm(f.form)) : view === "insider" ? INSIDER_FORMS.includes(baseForm(f.form)) : true,
+  );
+  // Glossary of the filing types that actually appear here.
+  const glossary = [...new Map(data.filings.filter((f) => f.help).map((f) => [baseForm(f.form), f])).values()];
   return (
     <>
-      <label className="small muted check">
-        <input type="checkbox" checked={onlyMain} onChange={(e) => setOnlyMain(e.target.checked)} /> 10-K · 10-Q · 8-K만 보기
-      </label>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>날짜</th>
-              <th className="left">서류</th>
-              <th className="left">설명</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((f) => (
-              <tr key={f.url}>
-                <td>{f.date}</td>
-                <td className="left">
-                  <a href={f.url} target="_blank" rel="noreferrer" className="ticker">
-                    {f.form}
-                  </a>{" "}
-                  <span className="muted">{f.label}</span>
-                </td>
-                <td className="left muted">{f.description}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="filings__bar">
+        <Tabs
+          label="서류 종류"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "all", label: "전체" },
+            { value: "main", label: "실적·주요 공시" },
+            { value: "insider", label: "내부자 거래" },
+          ]}
+        />
+        {glossary.length ? (
+          <details className="filings__glossary small">
+            <summary>서류 종류가 뭔가요?</summary>
+            <dl>
+              {glossary.map((f) => (
+                <div key={f.form}>
+                  <dt>
+                    {baseForm(f.form)} <span className="muted">{f.label}</span>
+                  </dt>
+                  <dd className="muted">{f.help}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
+        ) : null}
       </div>
+      {rows.length ? (
+        <div className="table-wrap">
+          <table className="table filings">
+            <thead>
+              <tr>
+                <th>날짜</th>
+                <th className="left">서류</th>
+                <th className="left">내용</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((f) => (
+                <tr key={f.url}>
+                  <td>{f.date}</td>
+                  <td className="left">
+                    <a href={f.url} target="_blank" rel="noreferrer" className="ticker" title="SEC 원문 (영문)">
+                      {f.form}
+                    </a>{" "}
+                    <span className="muted">{f.label}</span>
+                  </td>
+                  <td className="left">
+                    {f.summary ? (
+                      <>
+                        <span className="filings__text">{f.summary.text}</span>
+                        {f.summary.note ? <span className="filings__note">{f.summary.note}</span> : null}
+                      </>
+                    ) : (
+                      <span className="filings__note">{f.help || f.description}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted small">최근 서류 중에는 이 종류가 없어요.</p>
+      )}
       <p className="small muted" style={{ marginTop: 8 }}>
-        출처: SEC EDGAR
+        출처: SEC EDGAR. 요약은 서류의 정형 데이터를 그대로 옮긴 거예요. 서류 번호를 누르면 원문(영문)이 열려요.
       </p>
     </>
   );
