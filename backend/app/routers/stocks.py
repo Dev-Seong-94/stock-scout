@@ -133,7 +133,9 @@ def ownership(symbol: str) -> dict:
 def stock_news(symbol: str) -> dict:
     symbol = _check(symbol)
     items = market.news(symbol)
-    name = market.info(symbol).get("shortName")
+    # GDELT only fills in when Yahoo has little: it allows one call per 5 s and
+    # queues behind the macro page, which made this tab hang for a minute.
+    name = market.info(symbol).get("shortName") if len(items) < 5 else None
     if name:
         cleaned = re.sub(r"\b(Inc\.?|Corporation|Corp\.?|Co\.?|Ltd\.?|plc|Holdings?|Class [A-C])\b", "", name).strip(" ,.")
         try:

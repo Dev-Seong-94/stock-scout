@@ -7,8 +7,12 @@ be delayed or briefly unavailable, and it is not licensed for redistribution.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+import feedparser
+import httpx
 import pandas as pd
 import yfinance as yf
 
@@ -94,27 +98,48 @@ def quotes(symbols: list[str]) -> list[dict]:
     return out
 
 
+YAHOO_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline"
+
+
+def _host(url: str) -> str:
+    return re.sub(r"^www\.", "", urlparse(url).netloc)
+
+
 @ttl_cache(seconds=30 * 60)
-def news(symbol: str, limit: int = 15) -> list[dict]:
-    try:
-        items = yf.Ticker(symbol).news or []
-    except Exception:
-        return []
+def news(symbol: str, limit: int = 20) -> list[dict]:
+    """Yahoo headlines for one ticker. Ticker.news has come back empty since
+    late 2026, so the per-ticker RSS feed comes first and Search is the fallback."""
     out = []
-    for item in items[:limit]:
-        content = item.get("content", item)  # newer yfinance nests under "content"
-        url = (content.get("canonicalUrl") or {}).get("url") or content.get("link")
-        published = content.get("pubDate") or content.get("providerPublishTime")
-        if isinstance(published, (int, float)):
-            published = datetime.fromtimestamp(published, tz=timezone.utc).isoformat()
-        out.append(
-            {
-                "title": content.get("title"),
-                "url": url,
-                "source": (content.get("provider") or {}).get("displayName") or content.get("publisher"),
-                "published": published,
-            }
-        )
+    try:
+        r = httpx.get(YAHOO_RSS, params={"s": symbol, "region": "US", "lang": "en-US"}, headers={"User-Agent": "Mozilla/5.0"}, timeout=10, follow_redirects=True)
+        r.raise_for_status()
+        for e in feedparser.parse(r.content).entries[:limit]:
+            when = e.get("published_parsed")
+            out.append(
+                {
+                    "title": e.get("title"),
+                    "url": e.get("link"),
+                    "source": _host(e.get("link") or ""),
+                    "published": datetime(*when[:6], tzinfo=timezone.utc).isoformat() if when else None,
+                }
+            )
+    except Exception as exc:
+        log.warning("Yahoo RSS for %s failed: %s", symbol, exc)
+    if not out:
+        try:
+            items = yf.Search(symbol, news_count=limit).news or []
+        except Exception:
+            items = []
+        for item in items:
+            ts = item.get("providerPublishTime")
+            out.append(
+                {
+                    "title": item.get("title"),
+                    "url": item.get("link"),
+                    "source": item.get("publisher"),
+                    "published": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None,
+                }
+            )
     return [n for n in out if n["title"] and n["url"]]
 
 
