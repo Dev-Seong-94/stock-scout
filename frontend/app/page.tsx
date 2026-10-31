@@ -343,8 +343,12 @@ function MarginPanel() {
 
 const KIND_LABEL = { fomc: "FOMC", economic: "지표", earnings: "실적" } as const;
 
+const HEADLINES_SHOWN = 6; // the panel sits beside 이번 주 일정; keep the two about the same height
+
 function ThisWeek() {
   const { data, error, loading, reload } = useApi<{ events: CalendarEvent[]; notes: string[]; headlines: Article[] }>("/api/dashboard/week");
+  const [allNews, setAllNews] = useState(false);
+  const headlines = data?.headlines ?? [];
   const byDate = new Map<string, CalendarEvent[]>();
   for (const e of data?.events ?? []) byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
 
@@ -392,7 +396,7 @@ function ThisWeek() {
         <div className="panel__body">
           {loading ? <Skeleton height={160} /> : null}
           <ul className="list-plain">
-            {(data?.headlines ?? []).map((a) => (
+            {(allNews ? headlines : headlines.slice(0, HEADLINES_SHOWN)).map((a) => (
               <li key={a.url}>
                 <a className="article" href={a.url} target="_blank" rel="noreferrer">
                   <span className="article__title">{a.title}</span>
@@ -401,6 +405,11 @@ function ThisWeek() {
               </li>
             ))}
           </ul>
+          {headlines.length > HEADLINES_SHOWN ? (
+            <button type="button" className="btn btn--ghost small" onClick={() => setAllNews((v) => !v)}>
+              {allNews ? "접기" : `${headlines.length - HEADLINES_SHOWN}개 더 보기`}
+            </button>
+          ) : null}
         </div>
       </section>
     </div>
