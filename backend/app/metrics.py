@@ -306,8 +306,8 @@ PRESETS = [
     {
         "id": "quality-value",
         "name": "수익성 좋은데 덜 비싼",
-        "note": "ROE·영업이익률은 섹터 상위 40%, PER은 섹터 하위 40%인 종목",
-        "filters": {"roe@sector": [60, None], "operating_margin@sector": [60, None], "pe@sector": [None, 40]},
+        "note": "시총 10B 이상 중 ROE·영업이익률은 섹터 상위 30%, PER은 섹터 하위 40%인 종목",
+        "filters": {"market_cap": [10, None], "roe@sector": [70, None], "operating_margin@sector": [70, None], "pe@sector": [None, 40]},
         "checklist": [
             "이익이 일회성(자산 매각, 세금 환급 등)으로 부풀지 않았는지 순이익률과 영업이익률을 비교해 보세요.",
             "ROE가 높은 이유가 빚 때문은 아닌지 부채비율을 함께 보세요.",
@@ -316,8 +316,8 @@ PRESETS = [
     {
         "id": "growth-momentum",
         "name": "성장 + 상승 추세",
-        "note": "매출이 20% 이상 늘고 주가가 200일선 위에 있는 종목",
-        "filters": {"revenue_growth": [20, None], "dist_sma200": [0, None]},
+        "note": "시총 10B 이상, 매출이 25% 이상 늘고 주가가 200일선 위(0~30%)에 있는 종목",
+        "filters": {"market_cap": [10, None], "revenue_growth": [25, None], "dist_sma200": [0, 30]},
         "checklist": [
             "성장이 인수합병 덕분인지 회사 자체 성장인지 실적 발표(8-K)에서 확인하세요.",
             "이미 많이 오른 종목은 기대가 가격에 반영돼 있어요. 종목 화면의 PER·PSR 범위 막대를 보세요.",
@@ -326,19 +326,20 @@ PRESETS = [
     {
         "id": "oversold-large",
         "name": "많이 빠진 대형주",
-        "note": "시총 50B 이상, RSI 35 이하, 52주 고점 대비 −20% 이하",
-        "filters": {"market_cap": [50, None], "rsi14": [None, 35], "from_52w_high": [None, -20]},
+        "note": "시총 20B 이상, RSI 40 이하, 52주 고점 대비 −20% 이하",
+        "filters": {"market_cap": [20, None], "rsi14": [None, 40], "from_52w_high": [None, -20]},
         "checklist": [
             "왜 빠졌는지부터 확인하세요: 최근 실적 발표와 가이던스(종목 화면 → 공시의 8-K, 뉴스).",
             "실적 전망이 계속 낮아지는 중이면 '싸 보여도 더 싸지는' 가치 함정일 수 있어요.",
             "섹터 전체가 빠졌는지(대시보드 섹터 표), 이 회사만 빠졌는지 구분하세요.",
+            "선거·금리 결정 같은 큰 일정 직후에는 회사와 상관없이 시장 전체가 같이 움직이기도 해요. 며칠 지켜보고 다시 걸러 보세요.",
         ],
     },
     {
         "id": "steady-income",
         "name": "안정적인 배당",
-        "note": "배당수익률 3% 이상, 부채비율은 같은 섹터 안에서 낮은 편(하위 50%), 변동성 낮음",
-        "filters": {"dividend_yield": [3, None], "debt_to_equity@sector": [None, 50], "volatility_3m": [None, 30]},
+        "note": "시총 5B 이상, 배당수익률 3% 이상, 부채비율은 같은 섹터 안에서 낮은 편(하위 50%), 변동성 25% 이하",
+        "filters": {"market_cap": [5, None], "dividend_yield": [3, None], "debt_to_equity@sector": [None, 50], "volatility_3m": [None, 25]},
         "checklist": [
             "배당수익률이 높은 이유가 주가 급락이 아닌지 52주 고점 대비를 보세요.",
             "FCF 수익률이 배당수익률보다 낮으면 번 돈보다 많이 나눠주는 중일 수 있어요.",
@@ -348,8 +349,8 @@ PRESETS = [
     {
         "id": "funded-growth",
         "name": "적자지만 버틸 체력 있는 성장주",
-        "note": "아직 적자(순이익률 0 미만)이고, 매출 25% 이상 성장, 현금 런웨이 24개월 이상, 주식 수 증가 10% 이하",
-        "filters": {"net_margin": [None, 0], "revenue_growth": [25, None], "cash_runway": [24, None], "share_change_1y": [None, 10]},
+        "note": "아직 적자(순이익률 0 미만)이고, 매출 15% 이상 성장, 현금 런웨이 24개월 이상, 주식 수 증가 15% 이하",
+        "filters": {"net_margin": [None, 0], "revenue_growth": [15, None], "cash_runway": [24, None], "share_change_1y": [None, 15]},
         "checklist": [
             "PER·ROE는 적자라 의미가 없어요. PSR과 매출총이익률 변화를 보세요.",
             "런웨이는 지금 소진 속도 기준이에요. 투자를 늘리는 중이면 더 짧아질 수 있어요.",
