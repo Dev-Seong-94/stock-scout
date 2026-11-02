@@ -140,6 +140,16 @@ export function InfoTip({ metric, extra }: { metric: Pick<Metric, "label" | "des
   );
 }
 
+/** Developer/setup instructions (commands, env vars), folded away by default. */
+export function SetupHelp({ children, label = "설정 방법" }: { children: React.ReactNode; label?: string }) {
+  return (
+    <details className="setup-help small">
+      <summary>{label}</summary>
+      <div className="setup-help__body">{children}</div>
+    </details>
+  );
+}
+
 export function ErrorNote({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="note note--error" role="alert">

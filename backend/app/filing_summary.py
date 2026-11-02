@@ -7,6 +7,7 @@ Longer reports (10-K, 10-Q) are not summarised; the UI says what to read.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -243,3 +244,61 @@ def summarize_8k(items: str) -> dict | None:
 def form_help(form: str) -> str:
     base = form.removesuffix("/A")
     return FORM_HELP.get(base, "")
+
+
+# Yahoo's insider-transaction "Text" column → Form 4 code (see TX_CODES).
+_YAHOO_TX = [
+    ("sale", "S"),
+    ("purchase", "P"),
+    ("stock award", "A"),
+    ("stock gift", "G"),
+    ("conversion of exercise", "M"),
+    ("option exercise", "M"),
+    ("payment of exercise price or tax liability", "F"),
+    ("disposition to the issuer", "D"),
+    ("inheritance", "W"),
+]
+
+_YAHOO_ROLES = {
+    "director": "이사",
+    "officer": "임원",
+    "general counsel": "법무 책임자",
+    "chief executive officer": "CEO",
+    "chief financial officer": "CFO",
+    "chief operating officer": "COO",
+    "chief technology officer": "CTO",
+    "president": "사장",
+    "chairman": "이사회 의장",
+    "beneficial owner of more than 10% of a class of security": "10% 이상 대주주",
+}
+
+
+def yahoo_insider_row(row: dict) -> dict:
+    """Korean fields for one row of Yahoo's insider transactions.
+
+    'Sale at price 222.19 - 223.75 per share.' → kind '장내 매도',
+    detail '주당 $222.19–$223.75'. Unknown wording keeps the English text so
+    nothing is silently lost.
+    """
+    raw = str(row.get("Text") or row.get("Transaction") or "").strip()
+    low = raw.lower()
+    code = next((c for key, c in _YAHOO_TX if low.startswith(key)), None)
+    label, help_text = TX_CODES.get(code, (raw, "")) if code else (raw, "")
+
+    detail = ""
+    prices = [float(p) for p in re.findall(r"(\d+(?:\.\d+)?)", low.split(" at price", 1)[1])] if " at price" in low else []
+    prices = [p for p in prices if p > 0]
+    if prices:
+        lo, hi = min(prices), max(prices)
+        detail = f"주당 ${lo:,.2f}" if lo == hi else f"주당 ${lo:,.2f}–${hi:,.2f}"
+
+    position = str(row.get("Position") or "").strip()
+    role = _YAHOO_ROLES.get(position.lower(), position)
+    name = str(row.get("Insider") or "").strip()
+    return {
+        "kind_ko": label,
+        "detail_ko": detail,
+        "help_ko": help_text,
+        "role_ko": role,
+        "name_ko": person_name(name) if name else "",
+    }

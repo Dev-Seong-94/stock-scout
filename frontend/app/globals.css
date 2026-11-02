@@ -663,6 +663,9 @@ textarea {
 }
 
 .regime__item {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr); /* a wrapped sentence stays in its own column */
+  gap: 0.5rem;
   padding: 0.5rem 0.875rem;
   border-left: 3px solid var(--line);
   background: var(--panel);
@@ -670,10 +673,11 @@ textarea {
   font-size: 14px;
 }
 
-.regime__item b {
-  display: inline-block;
-  min-width: 4.5rem;
-  margin-right: 0.5rem;
+@media (max-width: 600px) {
+  .regime__item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.125rem;
+  }
 }
 
 .regime__item--calm {
@@ -830,14 +834,56 @@ textarea {
   border-radius: 0 3px 3px 0;
 }
 
+/* Sectors and this week's events side by side (similar heights, stretched to
+   match), headlines underneath across the full width. */
 .dash-lower {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: start;
+  grid-template-areas:
+    "sectors events"
+    "news news";
+}
+
+.dash-sectors {
+  grid-area: sectors;
+}
+
+.dash-events {
+  grid-area: events;
+}
+
+.dash-news {
+  grid-area: news;
+}
+
+.headlines {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 2rem;
+}
+
+.headlines li + li {
+  border-top: 0;
+}
+
+.headlines li:nth-child(n + 3) {
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 1100px) {
   .dash-lower {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "sectors"
+      "events"
+      "news";
+  }
+
+  .headlines {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .headlines li:nth-child(n + 2) {
+    border-top: 1px solid var(--line);
   }
 }
 
@@ -896,10 +942,6 @@ textarea {
 .bars__value {
   text-align: right;
   font-weight: 500;
-}
-
-.week {
-  align-content: start;
 }
 
 .events {
@@ -1432,7 +1474,8 @@ textarea {
 
 .metric-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  /* --metric-cols is picked in JS so no group ends with one card alone. */
+  grid-template-columns: repeat(var(--metric-cols, auto-fill), minmax(9.5rem, 1fr));
   gap: 0.5rem;
 }
 
@@ -1514,7 +1557,6 @@ textarea {
 
 .macro-lower {
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  align-items: start;
 }
 
 @media (max-width: 1100px) {
@@ -1986,4 +2028,23 @@ textarea {
   background: var(--watch);
   color: #fff;
   font-weight: 700;
+}
+
+/* ── 설정 방법 (commands, env vars) ───────────────────── */
+.setup-help {
+  margin-top: 0.5rem;
+  color: var(--muted);
+}
+
+.setup-help summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.setup-help__body {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.375rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--line);
 }

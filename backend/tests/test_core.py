@@ -345,3 +345,21 @@ def test_industry_names_are_complete():
     assert all(ko and about.endswith("요.") for ko, about in INDUSTRIES.values())
     assert industry_ko("Semiconductors")[0] == "반도체"
     assert industry_ko("Something New") == (None, None)
+
+
+def test_yahoo_insider_rows_in_korean():
+    row = filing_summary.yahoo_insider_row(
+        {"Insider": "TETER TIMOTHY S", "Position": "General Counsel", "Text": "Sale at price 222.19 - 223.75 per share."}
+    )
+    assert row == {
+        "kind_ko": "장내 매도",
+        "detail_ko": "주당 $222.19–$223.75",
+        "help_ko": "시장에서 판 거래예요.",
+        "role_ko": "법무 책임자",
+        "name_ko": "Timothy S Teter",
+    }
+    award = filing_summary.yahoo_insider_row({"Position": "Officer", "Text": "Stock Award(Grant) at price 0.00 per share."})
+    assert (award["kind_ko"], award["detail_ko"], award["role_ko"]) == ("보상으로 주식 받음", "", "임원")
+    assert filing_summary.yahoo_insider_row({"Text": "Purchase at price 10.50 per share."})["detail_ko"] == "주당 $10.50"
+    # Unknown wording is kept as-is rather than dropped.
+    assert filing_summary.yahoo_insider_row({"Text": "Something New", "Position": "Trustee"})["kind_ko"] == "Something New"

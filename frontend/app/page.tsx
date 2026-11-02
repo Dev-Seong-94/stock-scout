@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 
-import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Sparkline, Tabs } from "@/components/ui";
+import { Change, ErrorNote, InfoTip, RangeBar, SetupHelp, Skeleton, Sparkline, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { dayLabel, num, relativeTime, signed } from "@/lib/format";
 import type { Article, CalendarEvent, FearGreed, Indicator, IndicatorsResponse, InsiderFlow, InsiderName, MarginDebt, SectorRow } from "@/lib/types";
@@ -115,7 +115,7 @@ function Sectors() {
   const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r[period] ?? 0)));
 
   return (
-    <section className="panel" aria-labelledby="sectors-title">
+    <section className="panel dash-sectors" aria-labelledby="sectors-title">
       <div className="panel__head">
         <h2 id="sectors-title">섹터 흐름</h2>
         <Tabs
@@ -343,18 +343,18 @@ function MarginPanel() {
 
 const KIND_LABEL = { fomc: "FOMC", economic: "지표", earnings: "실적" } as const;
 
-const HEADLINES_SHOWN = 6; // the panel sits beside 이번 주 일정; keep the two about the same height
+const HEADLINES_SHOWN = 6; // full-width row in two columns: three lines each before "더 보기"
 
 function ThisWeek() {
-  const { data, error, loading, reload } = useApi<{ events: CalendarEvent[]; notes: string[]; headlines: Article[] }>("/api/dashboard/week");
+  const { data, error, loading, reload } = useApi<{ events: CalendarEvent[]; notes: string[]; setup?: string[]; headlines: Article[] }>("/api/dashboard/week");
   const [allNews, setAllNews] = useState(false);
   const headlines = data?.headlines ?? [];
   const byDate = new Map<string, CalendarEvent[]>();
   for (const e of data?.events ?? []) byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
 
   return (
-    <div className="grid week">
-      <section className="panel" aria-labelledby="events-title">
+    <>
+      <section className="panel dash-events" aria-labelledby="events-title">
         <div className="panel__head">
           <h2 id="events-title">이번 주 일정</h2>
           <Link href="/macro#calendar" className="small muted">
@@ -384,9 +384,16 @@ function ThisWeek() {
               {n}
             </p>
           ))}
+          {data?.setup?.length ? (
+            <SetupHelp label="일정을 더 보려면">
+              {data.setup.map((n) => (
+                <p key={n}>{n}</p>
+              ))}
+            </SetupHelp>
+          ) : null}
         </div>
       </section>
-      <section className="panel" aria-labelledby="news-title">
+      <section className="panel dash-news" aria-labelledby="news-title">
         <div className="panel__head">
           <h2 id="news-title">시장 헤드라인</h2>
           <Link href="/macro#geo" className="small muted">
@@ -395,7 +402,7 @@ function ThisWeek() {
         </div>
         <div className="panel__body">
           {loading ? <Skeleton height={160} /> : null}
-          <ul className="list-plain">
+          <ul className="list-plain headlines">
             {(allNews ? headlines : headlines.slice(0, HEADLINES_SHOWN)).map((a) => (
               <li key={a.url}>
                 <a className="article" href={a.url} target="_blank" rel="noreferrer">
@@ -412,7 +419,7 @@ function ThisWeek() {
           ) : null}
         </div>
       </section>
-    </div>
+    </>
   );
 }
 

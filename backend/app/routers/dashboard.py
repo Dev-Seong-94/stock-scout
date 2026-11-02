@@ -126,7 +126,7 @@ def sectors() -> dict:
 def week() -> dict:
     """This week's scheduled events and the latest market headlines."""
     cal = calendar.upcoming(days=7)
-    return {"events": cal["events"], "notes": cal["notes"], "headlines": news.rss()[:12]}
+    return {"events": cal["events"], "notes": cal["notes"], "setup": cal["setup"], "headlines": news.rss()[:12]}
 
 
 @router.get("/insiders")

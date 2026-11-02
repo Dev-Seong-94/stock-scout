@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import LineChart from "@/components/LineChart";
-import { ErrorNote, Skeleton, Tabs } from "@/components/ui";
+import { ErrorNote, SetupHelp, Skeleton, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { dayLabel, num, relativeTime } from "@/lib/format";
 import { useWatchlist } from "@/lib/storage";
@@ -99,12 +99,18 @@ function SeriesGrid() {
 
 const KIND_LABEL = { fomc: "FOMC", economic: "지표", earnings: "실적" } as const;
 
+// The calendar and geopolitics panels sit side by side; show about the same
+// amount in each and let the rest open on demand.
+const CAL_DAYS_SHOWN = 6;
+const GEO_SHOWN = 8;
+
 function Calendar() {
   const watch = useWatchlist();
   const symbols = watch.items.map((i) => i.symbol).join(",");
-  const { data, error, loading, reload } = useApi<{ events: CalendarEvent[]; notes: string[] }>(
+  const { data, error, loading, reload } = useApi<{ events: CalendarEvent[]; notes: string[]; setup?: string[] }>(
     `/api/macro/calendar?days=30&symbols=${encodeURIComponent(symbols)}`,
   );
+  const [all, setAll] = useState(false);
   const byDate = useMemo(() => {
     const m = new Map<string, CalendarEvent[]>();
     for (const e of data?.events ?? []) m.set(e.date, [...(m.get(e.date) ?? []), e]);
@@ -120,7 +126,7 @@ function Calendar() {
         {error ? <ErrorNote message={error} onRetry={reload} /> : null}
         {loading ? <Skeleton height={200} /> : null}
         <ul className="events">
-          {[...byDate.entries()].map(([date, events]) => (
+          {[...byDate.entries()].slice(0, all ? undefined : CAL_DAYS_SHOWN).map(([date, events]) => (
             <li key={date}>
               <p className="events__date">{dayLabel(date)}</p>
               <ul>
@@ -133,6 +139,11 @@ function Calendar() {
             </li>
           ))}
         </ul>
+        {byDate.size > CAL_DAYS_SHOWN ? (
+          <button type="button" className="btn btn--ghost small" style={{ marginTop: 8 }} onClick={() => setAll((v) => !v)}>
+            {all ? "접기" : `${byDate.size - CAL_DAYS_SHOWN}일 치 일정 더 보기`}
+          </button>
+        ) : null}
         {data && !data.events.length ? <p className="muted small">예정된 이벤트가 없어요.</p> : null}
         {data?.notes.map((n) => (
           <p key={n} className="small muted" style={{ marginTop: 8 }}>
@@ -142,6 +153,13 @@ function Calendar() {
         <p className="small muted" style={{ marginTop: 8 }}>
           실적 발표는 관심종목에 있는 종목만 보여줘요.
         </p>
+        {data?.setup?.length ? (
+          <SetupHelp label="일정을 더 보려면">
+            {data.setup.map((n) => (
+              <p key={n}>{n}</p>
+            ))}
+          </SetupHelp>
+        ) : null}
       </div>
     </section>
   );
@@ -151,6 +169,8 @@ function Geo() {
   const topics = useApi<{ topics: { key: string; label: string }[] }>("/api/macro/geo/topics");
   const [topic, setTopic] = useState("trade");
   const { data, error, loading, reload } = useApi<{ articles: Article[] }>(`/api/macro/geo?topic=${topic}`);
+  const [all, setAll] = useState(false);
+  const articles = data?.articles ?? [];
 
   return (
     <section className="panel" id="geo" aria-labelledby="geo-title">
@@ -165,7 +185,7 @@ function Geo() {
         {loading ? <Skeleton height={240} /> : null}
         {data && !data.articles.length ? <p className="muted small">기사를 찾지 못했어요. GDELT가 잠시 응답하지 않을 수 있어요.</p> : null}
         <ul className="list-plain">
-          {(data?.articles ?? []).map((a) => (
+          {articles.slice(0, all ? undefined : GEO_SHOWN).map((a) => (
             <li key={a.url}>
               <a className="article" href={a.url} target="_blank" rel="noreferrer">
                 <span className="article__title">{a.title}</span>
@@ -177,6 +197,11 @@ function Geo() {
             </li>
           ))}
         </ul>
+        {articles.length > GEO_SHOWN ? (
+          <button type="button" className="btn btn--ghost small" onClick={() => setAll((v) => !v)}>
+            {all ? "접기" : `${articles.length - GEO_SHOWN}개 더 보기`}
+          </button>
+        ) : null}
         <p className="small muted" style={{ marginTop: 8 }}>
           출처: GDELT (전 세계 영문 기사 색인)
         </p>

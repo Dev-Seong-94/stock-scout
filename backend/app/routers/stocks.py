@@ -5,7 +5,7 @@ import re
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
-from app import screener
+from app import filing_summary, screener
 from app.indicators import _clean, performance_since
 from app.industries import industry_ko
 from app.metrics import METRICS, SECTORS
@@ -120,12 +120,14 @@ def valuation(symbol: str) -> dict:
 def ownership(symbol: str) -> dict:
     symbol = _check(symbol)
     info = market.info(symbol)
+    own = market.ownership(symbol)
     return {
         "short_float": _clean(info.get("shortPercentOfFloat")) and info["shortPercentOfFloat"] * 100,
         "short_ratio": _clean(info.get("shortRatio")),
         "insider_pct": _clean(info.get("heldPercentInsiders")) and info["heldPercentInsiders"] * 100,
         "institution_pct": _clean(info.get("heldPercentInstitutions")) and info["heldPercentInstitutions"] * 100,
-        **market.ownership(symbol),
+        **own,
+        "insider_transactions": [{**row, **filing_summary.yahoo_insider_row(row)} for row in own["insider_transactions"]],
     }
 
 

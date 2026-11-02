@@ -68,7 +68,8 @@ def upcoming(days: int = 30, symbols: tuple[str, ...] = ()) -> dict:
     start = date.today()
     end = start + timedelta(days=days)
     events: list[dict] = fomc_events(start, end)
-    notes: list[str] = []
+    notes: list[str] = []  # shown as-is: something the user should know
+    setup: list[str] = []  # configuration hints, shown folded away in the UI
     try:
         events += [e for e in fred.upcoming_releases(days) if e["date"] <= end.isoformat()]
     except fred.FredUnavailable as exc:
@@ -79,6 +80,6 @@ def upcoming(days: int = 30, symbols: tuple[str, ...] = ()) -> dict:
     if settings.finnhub_api_key:
         events += earnings(start, end, symbols)
     else:
-        notes.append("실적 발표 일정은 FINNHUB_API_KEY를 넣으면 표시돼요.")
+        setup.append("실적 발표 일정은 backend/.env에 FINNHUB_API_KEY를 넣으면 표시돼요.")
     events.sort(key=lambda e: (e["date"], e["kind"]))
-    return {"events": events, "notes": notes}
+    return {"events": events, "notes": notes, "setup": setup}

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { CriteriaForm, CriteriaSummary } from "@/components/MyCriteria";
-import { ErrorNote, InfoTip, Skeleton, WatchStar } from "@/components/ui";
+import { ErrorNote, InfoTip, SetupHelp, Skeleton, WatchStar } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { focusMetrics, presetFit, SHORT_HORIZON_NOTE, type Profile } from "@/lib/criteria";
 import { direction, metricCell, metricValue, price, relativeTime, unitSuffix } from "@/lib/format";
@@ -498,10 +498,12 @@ function Screener() {
       </div>
 
       {staleDays >= STALE_DAYS ? (
-        <p className="note small">
-          스크리너 데이터가 {staleDays}일 전 것이에요. 가격 지표(RSI, 수익률 등)가 지금과 다를 수 있어요. backend 폴더에서{" "}
-          <code>python -m scripts.build_snapshot</code>으로 새로 만들 수 있어요.
-        </p>
+        <div className="note small">
+          <p>스크리너 데이터가 {staleDays}일 전 것이에요. 가격 지표(RSI, 수익률 등)가 지금과 다를 수 있어요.</p>
+          <SetupHelp label="새로 만드는 방법">
+            backend 폴더에서 <code>python -m scripts.build_snapshot</code>을 실행하세요. 전체는 45–60분쯤 걸려요.
+          </SetupHelp>
+        </div>
       ) : null}
 
       {!catalog.snapshot ? <SnapshotMissing catalog={catalog} onBuilt={catalogReq.reload} /> : null}
@@ -762,10 +764,14 @@ function Screener() {
           {!showStart && profile ? <CriteriaSummary /> : null}
 
           {skipped.length ? (
-            <p className="note small">
-              <b>{skipped.join(", ")}</b> 조건은 지금 데이터에 없어서 적용되지 않았어요. 새로 추가된 지표라 스냅샷을 다시 만들어야 해요 (backend 폴더에서{" "}
-              <code>python -m scripts.build_snapshot --fresh</code>).
-            </p>
+            <div className="note small">
+              <p>
+                <b>{skipped.join(", ")}</b> 조건은 지금 데이터에 없어서 적용되지 않았어요. 새로 추가된 지표라 스냅샷을 다시 만들어야 해요.
+              </p>
+              <SetupHelp label="다시 만드는 방법">
+                backend 폴더에서 <code>python -m scripts.build_snapshot --fresh</code>를 실행하세요.
+              </SetupHelp>
+            </div>
           ) : null}
 
           {checklist.length ? (

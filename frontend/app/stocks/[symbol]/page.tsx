@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import CandleChart from "@/components/CandleChart";
 import LineChart from "@/components/LineChart";
@@ -100,11 +100,49 @@ function PriceChart({ symbol }: { symbol: string }) {
   );
 }
 
+const CARD_MIN_PX = 152; // 9.5rem, matches .metric-cards
+const CARD_GAP_PX = 8;
+
+/**
+ * One column count for every metric group, chosen so that no group ends with
+ * a single card on its own row (8 cards in 7 columns leaves one behind; in 6
+ * or 4 it doesn't). Stays within the top quarter of what fits, so cards don't
+ * get much wider than they need to.
+ */
+function balancedColumns(width: number, groupSizes: number[]): number {
+  const fit = Math.max(1, Math.floor((width + CARD_GAP_PX) / (CARD_MIN_PX + CARD_GAP_PX)));
+  const lowest = Math.max(1, Math.ceil(fit * 0.75));
+  let best = fit;
+  let bestOrphans = Infinity;
+  for (let cols = fit; cols >= lowest; cols--) {
+    const orphans = groupSizes.filter((n) => n > cols && n % cols === 1).length;
+    if (orphans < bestOrphans) {
+      best = cols;
+      bestOrphans = orphans;
+    }
+  }
+  return best;
+}
+
 function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalog }) {
+  const box = useRef<HTMLElement>(null);
+  const [cols, setCols] = useState<number | null>(null);
+  const groupSizes = catalog.groups.map((g) => catalog.metrics.filter((m) => m.group === g.key).length);
+  const sizesKey = groupSizes.join();
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const sizes = sizesKey.split(",").map(Number);
+    const measure = () => setCols(balancedColumns(el.clientWidth, sizes));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [sizesKey]);
   const built = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
   const snapshotDate = built ? `${built.getMonth() + 1}/${built.getDate()}` : null;
   return (
-    <section aria-labelledby="metrics-title">
+    <section ref={box} aria-labelledby="metrics-title" style={cols ? ({ "--metric-cols": cols } as React.CSSProperties) : undefined}>
       <div className="section-head">
         <h2 id="metrics-title">지표</h2>
         {detail.peer_count ? (
@@ -361,9 +399,13 @@ function Flow({ symbol }: { symbol: string }) {
               {data.insider_transactions.map((t, i) => (
                 <tr key={i}>
                   <td>{String(t["Start Date"] ?? "")}</td>
-                  <td className="left">{String(t.Insider ?? "")}</td>
-                  <td className="left muted">{String(t.Position ?? "")}</td>
-                  <td className="left">{String(t.Text || t.Transaction || "")}</td>
+                  <td className="left">{String(t.name_ko || t.Insider || "")}</td>
+                  <td className="left muted">{String(t.role_ko || t.Position || "")}</td>
+                  {/* Hover shows what the trade type means and Yahoo's original wording. */}
+                  <td className="left" title={[t.help_ko, t.Text || t.Transaction].filter(Boolean).join("\n원문: ")}>
+                    {String(t.kind_ko || t.Text || t.Transaction || "")}
+                    {t.detail_ko ? <span className="muted"> · {String(t.detail_ko)}</span> : null}
+                  </td>
                   <td>{t.Shares != null ? num(Number(t.Shares), 0) : "–"}</td>
                   <td>{t.Value ? `$${num(Number(t.Value) / 1e6, 2)}M` : "–"}</td>
                 </tr>
