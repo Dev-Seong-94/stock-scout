@@ -1,25 +1,25 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
-import { CriteriaForm, CriteriaSummary } from "@/components/MyCriteria";
-import { ErrorNote, InfoTip, SetupHelp, Skeleton, WatchStar } from "@/components/ui";
+import { CriteriaSummary } from "@/components/MyCriteria";
+import { CompareBar } from "@/components/screener/CompareBar";
+import { baseKey, describeRange, isActive, plainRange, toCsv } from "@/components/screener/conditions";
+import { FilterPanel } from "@/components/screener/FilterPanel";
+import { PAGE_SIZE, ResultsTable } from "@/components/screener/ResultsTable";
+import { SnapshotMissing } from "@/components/screener/SnapshotMissing";
+import { StartHere } from "@/components/screener/StartHere";
+import { ErrorNote, SetupHelp, Skeleton } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
-import { focusMetrics, presetFit, SHORT_HORIZON_NOTE, type Profile } from "@/lib/criteria";
-import { direction, metricCell, metricValue, price, relativeTime, unitSuffix } from "@/lib/format";
-import { COMPARE_MAX, useCompare, useProfile, useSavedPresets, useWatchlist } from "@/lib/storage";
+import { focusMetrics } from "@/lib/criteria";
+import { relativeTime } from "@/lib/format";
+import { useProfile } from "@/lib/storage";
 import { SECTOR_SUFFIX } from "@/lib/types";
-import type { Catalog, Filters, Metric, Preset, Range, ScreenResult } from "@/lib/types";
+import type { Catalog, Filters, Preset, Range, ScreenResult } from "@/lib/types";
 
-const PAGE = 100;
 const DEFAULT_COLUMNS = ["market_cap", "pe", "roe", "revenue_growth", "rsi14", "ret_3m"];
-// Signed price moves get up/down colour; everything else stays neutral.
-const SIGNED = new Set(["ret_1m", "ret_3m", "ret_6m", "ret_1y", "dist_sma50", "dist_sma200", "from_52w_high", "share_change_1y", "gross_margin_change"]);
 const STALE_DAYS = 3;
-
-const baseKey = (key: string) => (key.endsWith(SECTOR_SUFFIX) ? key.slice(0, -SECTOR_SUFFIX.length) : key);
 
 // Shown whenever a filter looks for stocks that fell a lot: the classic value trap.
 const FALLEN_CHECKLIST = [
@@ -27,334 +27,12 @@ const FALLEN_CHECKLIST = [
   "실적 전망이 계속 낮아지는 중이면 싸 보여도 더 싸질 수 있어요(가치 함정).",
 ];
 
-function RangeInputs({
-  metric,
-  value,
-  sector,
-  onChange,
-}: {
-  metric: Metric;
-  value: Range | undefined;
-  sector: boolean;
-  onChange: (r: Range) => void;
-}) {
-  const [lo, hi] = value ?? [null, null];
-  const parse = (s: string) => (s.trim() === "" || s === "-" ? null : Number(s));
-  const suffix = sector ? "%ile" : unitSuffix(metric.unit);
-  return (
-    <div className="range-inputs">
-      <input
-        className="input"
-        type="number"
-        inputMode="decimal"
-        step={sector ? 5 : metric.step}
-        min={sector ? 0 : undefined}
-        max={sector ? 100 : undefined}
-        aria-label={`${metric.label} ${sector ? "섹터 백분위 " : ""}최소`}
-        placeholder={sector ? "0" : "최소"}
-        value={lo ?? ""}
-        onChange={(e) => onChange([parse(e.target.value), hi])}
-      />
-      <span className="muted" aria-hidden="true">
-        ~
-      </span>
-      <input
-        className="input"
-        type="number"
-        inputMode="decimal"
-        step={sector ? 5 : metric.step}
-        min={sector ? 0 : undefined}
-        max={sector ? 100 : undefined}
-        aria-label={`${metric.label} ${sector ? "섹터 백분위 " : ""}최대`}
-        placeholder={sector ? "100" : "최대"}
-        value={hi ?? ""}
-        onChange={(e) => onChange([lo, parse(e.target.value)])}
-      />
-      <span className="range-inputs__unit muted small">{suffix}</span>
-    </div>
-  );
-}
-
-function isActive(r: Range | undefined) {
-  return !!r && (r[0] !== null || r[1] !== null);
-}
-
-// Metrics where the sign carries the meaning (up/down, above/below). "최대 −20"
-// reads backwards for them, so conditions are also said in words.
-type Words = { subj: string; up: string; down: string; notUp: string; notDown: string; zeroUp: string; zeroDown: string; unit?: string };
-const period = (subj: string): Words => ({
-  subj,
-  up: "오른",
-  down: "떨어진",
-  notUp: "오르지 않은",
-  notDown: "떨어지지 않은",
-  zeroUp: `${subj} 오른`,
-  zeroDown: `${subj} 떨어진`,
-});
-const average = (line: string): Words => ({
-  subj: `${line}보다`,
-  up: "위에 있는",
-  down: "아래에 있는",
-  notUp: "위로 벗어나지 않은",
-  notDown: "아래로 벗어나지 않은",
-  zeroUp: `${line} 위에 있는`,
-  zeroDown: `${line} 아래에 있는`,
-});
-const PLAIN: Record<string, Words> = {
-  ret_1m: period("한 달간"),
-  ret_3m: period("3개월간"),
-  ret_6m: period("6개월간"),
-  ret_1y: period("1년간"),
-  dist_sma50: average("50일선"),
-  dist_sma200: average("200일선"),
-  from_52w_high: { subj: "고점보다", up: "", down: "빠진", notUp: "", notDown: "빠지지 않은", zeroUp: "고점에 있는", zeroDown: "고점보다 낮은" },
-  share_change_1y: {
-    subj: "주식 수가 1년간",
-    up: "늘어난",
-    down: "줄어든",
-    notUp: "늘지 않은",
-    notDown: "줄지 않은",
-    zeroUp: "주식 수가 1년간 늘어난",
-    zeroDown: "주식 수가 1년간 줄어든",
-  },
-  gross_margin_change: {
-    subj: "매출총이익률이 1년간",
-    up: "오른",
-    down: "내린",
-    notUp: "오르지 않은",
-    notDown: "내리지 않은",
-    zeroUp: "매출총이익률이 1년간 오른",
-    zeroDown: "매출총이익률이 1년간 내린",
-    unit: "%p",
-  },
-};
-
-/** "고점보다 20% 이상 빠진 종목" for signed metrics; null when no wording fits. */
-function plainRange(key: string, r: Range): string | null {
-  const w = PLAIN[key];
-  if (!w) return null;
-  const u = w.unit ?? "%";
-  const n = (v: number) => `${Math.abs(v)}${u}`;
-  const [lo, hi] = r;
-  let text: string | null = null;
-  if (lo !== null && hi !== null) {
-    if (hi <= 0 && lo < 0) text = hi === 0 ? `${w.subj} ${n(lo)} 이내로 ${w.down}` : `${w.subj} ${Math.abs(hi)}~${n(lo)} ${w.down}`;
-    else if (lo >= 0 && hi > 0 && w.up) text = lo === 0 ? `${w.subj} ${n(hi)} 이내로 ${w.up}` : `${w.subj} ${lo}~${n(hi)} ${w.up}`;
-  } else if (lo !== null) {
-    text = lo > 0 ? (w.up ? `${w.subj} ${n(lo)} 이상 ${w.up}` : null) : lo === 0 ? w.zeroUp : `${w.subj} ${n(lo)} 넘게 ${w.notDown}`;
-  } else if (hi !== null) {
-    text = hi < 0 ? `${w.subj} ${n(hi)} 이상 ${w.down}` : hi === 0 ? w.zeroDown : w.notUp ? `${w.subj} ${n(hi)} 넘게 ${w.notUp}` : null;
-  }
-  return text ? `${text} 종목` : null;
-}
-
-function describeRange(key: string, r: Range, m: Metric) {
-  const [lo, hi] = r;
-  if (key.endsWith(SECTOR_SUFFIX)) {
-    if (lo !== null && hi !== null) return `섹터 내 ${lo}–${hi}%ile`;
-    if (lo !== null) return `섹터 상위 ${100 - lo}%`;
-    return `섹터 하위 ${hi}%`;
-  }
-  if (lo !== null && hi !== null) return `${metricValue(lo, m.unit)} ~ ${metricValue(hi, m.unit)}`;
-  if (lo !== null) return `${metricValue(lo, m.unit)} 이상`;
-  return `${metricValue(hi, m.unit)} 이하`;
-}
-
-/** First screen: the "내 기준" questions, then example combinations ordered by them. */
-function StartHere({
-  presets,
-  profile,
-  onPick,
-  onSkip,
-}: {
-  presets: Preset[];
-  profile: Profile | null;
-  onPick: (p: Preset) => void;
-  onSkip: () => void;
-}) {
-  // Names only by default so the results table stays near the top; the notes
-  // and warnings are one click away (and in each button's tooltip).
-  const [detailed, setDetailed] = useState(false);
-  const fits = new Map(presets.map((p) => [p.id, profile ? presetFit(p.id, profile) : null]));
-  const ordered = profile ? [...presets].sort((a, b) => (fits.get(b.id)?.score ?? 0) - (fits.get(a.id)?.score ?? 0)) : presets;
-  return (
-    <section className={`panel start-here ${detailed ? "" : "start-here--compact"}`} aria-labelledby="start-here-title">
-      <div className="start-here__head">
-        <div>
-          <h2 id="start-here-title">어디서 시작할까요?</h2>
-          <p className="small muted">
-            {profile
-              ? "내 기준에 맞춰 예시 조합의 순서를 바꿨어요. 추천이 아니라 거르는 방법의 예시예요."
-              : "먼저 세 가지만 답해 주세요. 답에 맞춰 예시 조합과 먼저 볼 지표를 앞에 놓아 드려요."}
-          </p>
-        </div>
-        <button type="button" className="btn btn--ghost small" onClick={onSkip}>
-          직접 고를게요
-        </button>
-      </div>
-      {profile ? <CriteriaSummary /> : <CriteriaForm />}
-      {profile?.horizon === "short" ? <p className="note small">{SHORT_HORIZON_NOTE}</p> : null}
-      <div className="start-here__presets-head">
-        <h3 className="small">예시 조합</h3>
-        <button type="button" className="btn btn--ghost small" aria-expanded={detailed} onClick={() => setDetailed((d) => !d)}>
-          {detailed ? "이름만 보기" : "설명 함께 보기"}
-        </button>
-      </div>
-      <ul className="start-here__list">
-        {ordered.map((p) => {
-          const fit = fits.get(p.id);
-          const warnings = fit?.warnings ?? [];
-          return (
-            <li key={p.id}>
-              <button
-                type="button"
-                className={`start-card ${fit && fit.score < 1 ? "is-dim" : ""}`}
-                title={detailed ? undefined : [p.note, ...warnings].filter(Boolean).join("\n") || undefined}
-                onClick={() => onPick(p)}
-              >
-                {fit?.goal ? <span className="start-card__badge small">기대와 맞아요</span> : null}
-                <b>{p.name}</b>
-                {!detailed && warnings.length ? <span className="start-card__warn small">주의 {warnings.length}</span> : null}
-                {detailed && p.note ? <span className="small muted">{p.note}</span> : null}
-                {detailed
-                  ? warnings.map((w) => (
-                      <span key={w} className="start-card__warn small">
-                        {w}
-                      </span>
-                    ))
-                  : null}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-/**
- * True when the table is wider than its box. Only then does the box scroll
- * sideways; otherwise it stays a plain block so the header can stick to the
- * page instead of an inner scroll area.
- */
-function useIsWide(boxRef: RefObject<HTMLDivElement | null>, remountKey: unknown) {
-  const [wide, setWide] = useState(false);
-  useLayoutEffect(() => {
-    const box = boxRef.current;
-    const table = box?.querySelector("table");
-    if (!box || !table) return;
-    const measure = () => setWide(table.scrollWidth > box.clientWidth + 1);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(box);
-    ro.observe(table);
-    return () => ro.disconnect();
-  }, [boxRef, remountKey]);
-  return wide;
-}
-
-/** Sticky bar while stocks are picked for the side-by-side view. */
-function CompareBar() {
-  const compare = useCompare();
-  if (!compare.symbols.length) return null;
-  return (
-    <div className="compare-bar" role="region" aria-label="비교함">
-      <span className="small">
-        비교함 <b>{compare.symbols.length}</b>/{COMPARE_MAX}
-      </span>
-      <span className="compare-bar__list small">
-        {compare.symbols.map((s) => (
-          <span key={s} className="chip">
-            {s}
-            <button type="button" aria-label={`${s} 비교함에서 빼기`} onClick={() => compare.toggle(s)}>
-              ×
-            </button>
-          </span>
-        ))}
-      </span>
-      <button type="button" className="btn btn--ghost small" onClick={() => compare.set([])}>
-        비우기
-      </button>
-      {compare.symbols.length < 2 ? (
-        <span className="small muted">하나 더 담으면 비교할 수 있어요</span>
-      ) : (
-        <Link className="btn btn--primary" href="/compare">
-          나란히 비교하기
-        </Link>
-      )}
-    </div>
-  );
-}
-
-function toCsv(rows: ScreenResult["rows"], columns: string[]) {
-  const head = ["symbol", "name", "sector", "price", ...columns];
-  const esc = (v: unknown) => {
-    const s = v === null || v === undefined ? "" : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return [head.join(","), ...rows.map((r) => head.map((h) => esc(r[h])).join(","))].join("\n");
-}
-
-function SnapshotMissing({ catalog, onBuilt }: { catalog: Catalog; onBuilt: () => void }) {
-  const [status, setStatus] = useState(catalog.status);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!status.running) return;
-    const t = window.setInterval(async () => {
-      const s = await api<{ status: Catalog["status"] }>("/api/screener/status").catch(() => null);
-      if (!s) return;
-      setStatus(s.status);
-      if (!s.status.running) {
-        window.clearInterval(t);
-        if (!s.status.error) onBuilt();
-      }
-    }, 3000);
-    return () => window.clearInterval(t);
-  }, [status.running, onBuilt]);
-
-  const start = async () => {
-    setError(null);
-    try {
-      const r = await api<{ status: Catalog["status"] }>("/api/screener/refresh", { method: "POST" });
-      setStatus(r.status);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  return (
-    <div className="note">
-      <p>
-        <b>스크리너 데이터가 아직 없어요.</b> 종목 지표는 하루에 한 번 미리 계산해 두고 그걸 필터해요. 터미널에서{" "}
-        <code>python -m scripts.build_snapshot</code>을 실행하거나 아래 버튼을 눌러 주세요. S&amp;P 500 + 나스닥 100 기준 10–20분
-        정도 걸려요.
-      </p>
-      <p style={{ marginTop: 10 }}>
-        {status.running ? (
-          <span>
-            만드는 중… {status.done}/{status.total}
-          </span>
-        ) : (
-          <button className="btn btn--primary" type="button" onClick={start}>
-            지금 만들기
-          </button>
-        )}
-      </p>
-      {status.error || error ? <p className="small" style={{ marginTop: 8 }}>오류: {status.error ?? error}</p> : null}
-    </div>
-  );
-}
-
 function Screener() {
   const router = useRouter();
   const params = useSearchParams();
   const catalogReq = useApi<Catalog>("/api/screener/metrics");
   const catalog = catalogReq.data;
-  const watch = useWatchlist();
-  const compare = useCompare();
   const [profile] = useProfile();
-  const [saved, setSaved] = useSavedPresets();
 
   const [filters, setFilters] = useState<Filters>({});
   const [sectors, setSectors] = useState<string[]>(() => (params.get("sector") ? [params.get("sector") as string] : []));
@@ -365,16 +43,11 @@ function Screener() {
   const [result, setResult] = useState<ScreenResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const [savingPreset, setSavingPreset] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const [metricQuery, setMetricQuery] = useState("");
   const [skipStart, setSkipStart] = useState(false);
   const [showFilters, setShowFilters] = useState(false); // only matters on narrow screens
   const [sectorMode, setSectorMode] = useState<Record<string, boolean>>({});
   const [presetChecklist, setPresetChecklist] = useState<{ name: string; items: string[] } | null>(null);
-  const tableBox = useRef<HTMLDivElement>(null);
-  const tableWide = useIsWide(tableBox, catalog ? (catalog.snapshot?.built_at ?? "no-snapshot") : null);
+  const [presetRun, setPresetRun] = useState(0); // remounts the filter panel so a preset's groups open
 
   const metricsByKey = useMemo(() => new Map((catalog?.metrics ?? []).map((m) => [m.key, m])), [catalog]);
   const activeKeys = Object.keys(filters).filter((k) => isActive(filters[k]));
@@ -395,7 +68,7 @@ function Screener() {
         const clean = Object.fromEntries(activeKeys.map((k) => [k, filters[k]]));
         const r = await api<ScreenResult>("/api/screener/search", {
           method: "POST",
-          body: JSON.stringify({ filters: clean, sectors, query, sort, descending: desc, limit: PAGE, offset: page * PAGE }),
+          body: JSON.stringify({ filters: clean, sectors, query, sort, descending: desc, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
         });
         setResult(r);
         setError(null);
@@ -431,17 +104,12 @@ function Screener() {
     setSectors(p.sectors ?? []);
     setSectorMode(Object.fromEntries(Object.keys(p.filters).filter((k) => k.endsWith(SECTOR_SUFFIX)).map((k) => [baseKey(k), true])));
     setPresetChecklist(p.checklist?.length ? { name: p.name, items: p.checklist } : null);
-    const groups = new Set(Object.keys(p.filters).map((k) => metricsByKey.get(baseKey(k))?.group));
-    setOpenGroups(Object.fromEntries([...groups].filter(Boolean).map((g) => [g as string, true])));
+    setPresetRun((n) => n + 1);
   };
 
-  const savePreset = () => {
-    const name = presetName.trim();
-    if (!name) return;
-    const clean = Object.fromEntries(activeKeys.map((k) => [k, filters[k]]));
-    setSaved((prev) => [{ id: `saved-${Date.now()}`, name, filters: clean, sectors }, ...prev.filter((p) => p.name !== name)]);
-    setPresetName("");
-    setSavingPreset(false);
+  const toggleSector = (key: string) => {
+    setPage(0);
+    setSectors((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]));
   };
 
   const reset = () => {
@@ -476,12 +144,9 @@ function Screener() {
   if (catalogReq.error) return <ErrorNote message={catalogReq.error} onRetry={catalogReq.reload} />;
   if (!catalog) return <Skeleton height={400} />;
 
-  const presets: Preset[] = [...saved, ...catalog.presets.map((p) => ({ ...p, builtin: true }))];
   const sectorLabel = new Map(catalog.sectors.map((s) => [s.key, s.label]));
   const builtAt = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
   const staleDays = builtAt ? Math.floor((Date.now() - builtAt.getTime()) / 86400000) : 0;
-  const mq = metricQuery.trim().toLowerCase();
-  const matchesQuery = (m: Metric) => !mq || `${m.label} ${m.key} ${m.description}`.toLowerCase().includes(mq);
   const showStart = !skipStart && !activeKeys.length && !sectors.length && !query && !!catalog.snapshot;
   const skipped = (result?.skipped ?? []).map((k) => metricsByKey.get(baseKey(k))?.label ?? k);
   const checklist = presetChecklist?.items ?? (lookingAtFallen ? FALLEN_CHECKLIST : []);
@@ -513,189 +178,21 @@ function Screener() {
       </button>
 
       <div className="screener">
-        <aside id="filters" className={`panel filters ${showFilters ? "is-open" : ""}`} aria-label="필터">
-          <div className="filters__top">
-            <label className="filters__presets">
-              <span className="small muted">프리셋</span>
-              <select
-                className="input"
-                value=""
-                onChange={(e) => {
-                  const p = presets.find((x) => x.id === e.target.value);
-                  if (p) applyPreset(p);
-                }}
-              >
-                <option value="">불러오기…</option>
-                {saved.length ? (
-                  <optgroup label="내 프리셋">
-                    {saved.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null}
-                <optgroup label="예시 조합">
-                  {catalog.presets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-            </label>
-            {savingPreset ? (
-              <form
-                className="filters__save"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  savePreset();
-                }}
-              >
-                <input className="input" autoFocus placeholder="프리셋 이름" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
-                <button className="btn btn--primary" type="submit" disabled={!presetName.trim()}>
-                  저장
-                </button>
-                <button className="btn btn--ghost" type="button" onClick={() => setSavingPreset(false)}>
-                  취소
-                </button>
-              </form>
-            ) : (
-              <div className="filters__actions">
-                <button className="btn" type="button" onClick={() => setSavingPreset(true)} disabled={!activeKeys.length && !sectors.length}>
-                  현재 조건 저장
-                </button>
-                <button className="btn btn--ghost" type="button" onClick={reset}>
-                  초기화
-                </button>
-              </div>
-            )}
-            {saved.length ? (
-              <details className="small">
-                <summary className="muted">내 프리셋 관리 ({saved.length})</summary>
-                <ul className="saved-presets">
-                  {saved.map((p) => (
-                    <li key={p.id}>
-                      <span>{p.name}</span>
-                      <button type="button" className="btn btn--ghost small" onClick={() => setSaved((prev) => prev.filter((x) => x.id !== p.id))}>
-                        삭제
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-          </div>
-
-          <div className="filters__group">
-            <p className="filters__label">섹터</p>
-            <div className="sector-chips">
-              {catalog.sectors.map((s) => {
-                const on = sectors.includes(s.key);
-                return (
-                  <button
-                    key={s.key}
-                    type="button"
-                    className="sector-chip"
-                    aria-pressed={on}
-                    onClick={() => {
-                      setPage(0);
-                      setSectors((prev) => (on ? prev.filter((x) => x !== s.key) : [...prev, s.key]));
-                    }}
-                  >
-                    {s.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="filters__find">
-            <input
-              className="input"
-              type="search"
-              placeholder="지표 찾기 (예: PER, 배당, 부채)"
-              aria-label="지표 찾기"
-              value={metricQuery}
-              onChange={(e) => setMetricQuery(e.target.value)}
-            />
-          </div>
-
-          {(focus.length && !mq ? [{ key: "mine", label: "내 기준으로 먼저 볼 지표" }, ...catalog.groups] : catalog.groups).map((g) => {
-            const metrics =
-              g.key === "mine"
-                ? focus.map((k) => metricsByKey.get(k)).filter((m): m is Metric => !!m)
-                : catalog.metrics.filter((m) => m.group === g.key && matchesQuery(m));
-            if (mq && !metrics.length) return null;
-            const count = metrics.filter((m) => isActive(filters[m.key]) || isActive(filters[m.key + SECTOR_SUFFIX])).length;
-            const open = mq ? true : (openGroups[g.key] ?? (g.key === "mine" || count > 0));
-            return (
-              <div key={g.key} className="filters__group">
-                <button
-                  type="button"
-                  className="filters__toggle"
-                  aria-expanded={open}
-                  onClick={() => setOpenGroups((o) => ({ ...o, [g.key]: !open }))}
-                >
-                  <span>{g.label}</span>
-                  {count ? <span className="count">{count}</span> : <span className="small muted">{metrics.length}개</span>}
-                  <span className="chev" aria-hidden="true">
-                    {open ? "−" : "+"}
-                  </span>
-                </button>
-                {open ? (
-                  <ul className="filters__list">
-                    {metrics.map((m) => {
-                      const d = catalog.distribution[m.key];
-                      const bySector = !!sectorMode[m.key];
-                      const key = bySector ? m.key + SECTOR_SUFFIX : m.key;
-                      return (
-                        <li key={m.key} className={isActive(filters[key]) ? "is-active" : ""}>
-                          <div className="filters__metric">
-                            <span>{m.label}</span>
-                            <InfoTip
-                              metric={m}
-                              extra={
-                                d ? (
-                                  <>
-                                    <dt>지금 분포</dt>
-                                    <dd>
-                                      하위 10% {metricValue(d.p10, m.unit)} · 중앙값 {metricValue(d.p50, m.unit)} · 상위 10%{" "}
-                                      {metricValue(d.p90, m.unit)} ({d.count.toLocaleString()}개 종목)
-                                    </dd>
-                                  </>
-                                ) : null
-                              }
-                            />
-                            {d && !bySector ? <span className="filters__median small muted">중앙 {metricValue(d.p50, m.unit)}</span> : null}
-                            <button
-                              type="button"
-                              className="mode-toggle small"
-                              aria-pressed={bySector}
-                              title="같은 섹터 종목들 사이에서의 순위로 거르기 (0 = 가장 낮음, 100 = 가장 높음)"
-                              onClick={() => setMode(m.key, !bySector)}
-                            >
-                              섹터 비교
-                            </button>
-                          </div>
-                          <RangeInputs metric={m} sector={bySector} value={filters[key]} onChange={(r) => setRange(key, r)} />
-                          {!bySector && isActive(filters[key]) && plainRange(key, filters[key]) ? (
-                            <p className="filters__hint filters__plain small">→ {plainRange(key, filters[key])}</p>
-                          ) : null}
-                          {bySector ? (
-                            <p className="filters__hint small muted">
-                              같은 섹터 안 순위예요. 예: 최대 30 = {m.label} 낮은 쪽 30%, 최소 70 = 높은 쪽 30%.
-                            </p>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-              </div>
-            );
-          })}
-        </aside>
+        <FilterPanel
+          key={presetRun}
+          catalog={catalog}
+          metricsByKey={metricsByKey}
+          filters={filters}
+          sectors={sectors}
+          sectorMode={sectorMode}
+          focus={focus}
+          open={showFilters}
+          onApplyPreset={applyPreset}
+          onToggleSector={toggleSector}
+          onSetRange={setRange}
+          onSetMode={setMode}
+          onReset={reset}
+        />
 
         <section className="results" aria-label="결과">
           <div className="results__bar">
@@ -787,111 +284,19 @@ function Screener() {
             </div>
           ) : null}
 
-          <div ref={tableBox} className={`panel results__table ${tableWide ? "is-wide" : ""}`}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col" className="cmp-col">
-                    <span title={`최대 ${COMPARE_MAX}개까지 담아 나란히 비교해요`}>비교</span>
-                  </th>
-                  <th scope="col" className="left ticker-col">
-                    종목
-                  </th>
-                  <th scope="col" className="left">
-                    섹터
-                  </th>
-                  <th scope="col">현재가</th>
-                  {columns.map((k) => {
-                    const m = metricsByKey.get(k)!;
-                    return (
-                      <th key={k} scope="col" aria-sort={sort === k ? (desc ? "descending" : "ascending") : undefined}>
-                        <button type="button" className="sort-btn" aria-sort={sort === k ? (desc ? "descending" : "ascending") : undefined} onClick={() => sortBy(k)}>
-                          {m.label}
-                          {sort === k ? (desc ? " ↓" : " ↑") : ""}
-                        </button>
-                      </th>
-                    );
-                  })}
-                  <th scope="col">
-                    <span className="sr-only">관심</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {result?.rows.map((r) => (
-                  <tr
-                    key={r.symbol}
-                    className="row-link"
-                    onClick={(e) => {
-                      // Let real links, buttons and text selection behave normally.
-                      if ((e.target as HTMLElement).closest("a, button, input") || window.getSelection()?.toString()) return;
-                      const href = `/stocks/${r.symbol}`;
-                      if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
-                      else router.push(href);
-                    }}
-                  >
-                    <td className="cmp-col">
-                      <input
-                        type="checkbox"
-                        aria-label={`${r.symbol} 비교함에 담기`}
-                        checked={compare.has(r.symbol)}
-                        disabled={!compare.has(r.symbol) && compare.full}
-                        onChange={() => compare.toggle(r.symbol)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </td>
-                    <td className="left ticker-col">
-                      <Link className="ticker" href={`/stocks/${r.symbol}`}>
-                        {r.symbol}
-                      </Link>
-                      <span className="results__name">{r.name}</span>
-                      {r.other_classes ? <span className="results__name">같은 회사 다른 주식: {r.other_classes}</span> : null}
-                    </td>
-                    <td className="left muted">{sectorLabel.get(r.sector ?? "") ?? r.sector ?? "–"}</td>
-                    <td>{price(r.price as number | null)}</td>
-                    {columns.map((k) => (
-                      <td
-                        key={k}
-                        className={`${filteredColumns.has(k) ? "is-filtered" : ""} ${SIGNED.has(k) ? direction(r[k] as number | null) : ""}`.trim() || undefined}
-                      >
-                        {metricCell(r[k] as number | null, metricsByKey.get(k)!)}
-                      </td>
-                    ))}
-                    <td>
-                      <WatchStar
-                        symbol={r.symbol}
-                        active={watch.has(r.symbol)}
-                        onToggle={() =>
-                          watch.has(r.symbol)
-                            ? watch.remove(r.symbol)
-                            : watch.add({ symbol: r.symbol, name: r.name, priceAtAdd: r.price as number | null })
-                        }
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {result && result.ready && !result.rows.length ? (
-              <p className="note" style={{ margin: 12 }}>
-                조건에 맞는 종목이 없어요. 칩의 ×를 눌러 조건을 하나씩 풀어 보세요.
-              </p>
-            ) : null}
-          </div>
-
-          {result && result.total > PAGE ? (
-            <div className="pager">
-              <button className="btn" type="button" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                이전
-              </button>
-              <span className="small muted">
-                {page * PAGE + 1}–{Math.min(result.total, (page + 1) * PAGE)} / {result.total.toLocaleString()}
-              </span>
-              <button className="btn" type="button" disabled={(page + 1) * PAGE >= result.total} onClick={() => setPage((p) => p + 1)}>
-                다음
-              </button>
-            </div>
-          ) : null}
+          <ResultsTable
+            result={result}
+            columns={columns}
+            filteredColumns={filteredColumns}
+            metricsByKey={metricsByKey}
+            sectorLabel={sectorLabel}
+            sort={sort}
+            desc={desc}
+            onSort={sortBy}
+            page={page}
+            onPage={setPage}
+            remountKey={catalog.snapshot?.built_at ?? "no-snapshot"}
+          />
         </section>
       </div>
       <CompareBar />

@@ -2048,3 +2048,16 @@ textarea {
   padding-left: 0.75rem;
   border-left: 2px solid var(--line);
 }
+
+.compare-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.compare-add .input {
+  flex: 0 1 16rem;
+  width: auto;
+}

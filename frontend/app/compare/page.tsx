@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 
 import { CriteriaSummary } from "@/components/MyCriteria";
 import { ErrorNote, InfoTip, Skeleton, WatchStar } from "@/components/ui";
@@ -58,6 +58,56 @@ function MetricRow({ m, rows, medians }: { m: Metric; rows: ScreenRow[]; medians
   );
 }
 
+/** Type tickers here instead of going back to the screener. Unknown ones come back in `missing`. */
+function AddTickers({ compare }: { compare: ReturnType<typeof useCompare> }) {
+  const [text, setText] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  if (compare.full) return null;
+
+  const add = () => {
+    const wanted = text
+      .toUpperCase()
+      .split(/[\s,]+/)
+      .filter((s) => /^[A-Z][A-Z0-9.\-]{0,9}$/.test(s));
+    const fresh = [...new Set(wanted)].filter((s) => !compare.has(s));
+    const room = COMPARE_MAX - compare.symbols.length;
+    if (!fresh.length) {
+      setNote(wanted.length ? "이미 비교함에 있어요." : "티커를 입력해 주세요. 예: NVDA, AMD");
+      return;
+    }
+    compare.set([...compare.symbols, ...fresh.slice(0, room)]);
+    setNote(fresh.length > room ? `최대 ${COMPARE_MAX}개라 ${fresh.slice(room).join(", ")}은(는) 빼고 담았어요.` : null);
+    setText("");
+  };
+
+  return (
+    <form
+      className="compare-add"
+      onSubmit={(e) => {
+        e.preventDefault();
+        add();
+      }}
+    >
+      <label className="sr-only" htmlFor="compare-add-input">
+        비교할 티커
+      </label>
+      <input
+        id="compare-add-input"
+        className="input"
+        placeholder="티커 입력 (예: NVDA, AMD)"
+        autoCapitalize="characters"
+        autoComplete="off"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button className="btn btn--primary" type="submit" disabled={!text.trim()}>
+        담기
+      </button>
+      {note ? <span className="small muted">{note}</span> : null}
+    </form>
+  );
+}
+
 export default function ComparePage() {
   const compare = useCompare();
   const watch = useWatchlist();
@@ -79,10 +129,13 @@ export default function ComparePage() {
         <p className="small muted">최대 {COMPARE_MAX}개 · 스크리너 데이터 기준</p>
       </div>
 
+      <AddTickers compare={compare} />
+
       {!compare.symbols.length ? (
         <div className="note">
           <p>
-            아직 비교함이 비어 있어요. 스크리너 결과에서 왼쪽 <b>비교</b> 칸을 체크해 2~{COMPARE_MAX}개를 담아 주세요.
+            아직 비교함이 비어 있어요. 위 칸에 티커를 바로 입력하거나, 스크리너 결과에서 왼쪽 <b>비교</b> 칸을 체크해 2~{COMPARE_MAX}개를
+            담아 주세요.
           </p>
           {watchSymbols.length >= 2 ? (
             <p style={{ marginTop: 8 }}>
@@ -100,7 +153,21 @@ export default function ComparePage() {
       {catalogReq.error ? <ErrorNote message={catalogReq.error} onRetry={catalogReq.reload} /> : null}
       {req.error ? <ErrorNote message={req.error} onRetry={req.reload} /> : null}
       {compare.symbols.length && (req.loading || !catalog) && !rows.length ? <Skeleton height={400} /> : null}
-      {req.data?.missing?.length ? <p className="note small">{req.data.missing.join(", ")}은(는) 스크리너 데이터에 없어서 뺐어요.</p> : null}
+      {req.data?.missing?.length ? (
+        <p className="note small">
+          {req.data.missing.join(", ")}은(는) 스크리너 데이터에 없어서 표에서 뺐어요.{" "}
+          <button
+            type="button"
+            className="btn btn--ghost small"
+            onClick={() => {
+              const missing = new Set(req.data?.missing ?? []);
+              compare.set(compare.symbols.filter((s) => !missing.has(s)));
+            }}
+          >
+            비교함에서도 빼기
+          </button>
+        </p>
+      ) : null}
 
       {catalog && rows.length ? (
         <>

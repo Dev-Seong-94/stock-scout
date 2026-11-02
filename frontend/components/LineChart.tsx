@@ -36,6 +36,19 @@ export function niceTicks(min: number, max: number, count = 4): number[] {
   return ticks;
 }
 
+/**
+ * One sentence for screen readers, since the SVG itself says nothing:
+ * "2021-10-29 0.08%에서 2026-10-29 3.88%로, 범위 0.05%–5.33%".
+ */
+export function trendSummary(dates: string[], values: (number | null)[], fmt: (v: number) => string): string {
+  const idx = values.flatMap((v, i) => (v === null ? [] : [i]));
+  if (!idx.length) return "데이터 없음";
+  const first = idx[0];
+  const last = idx[idx.length - 1];
+  const vals = idx.map((i) => values[i] as number);
+  return `${dates[first]} ${fmt(values[first] as number)}에서 ${dates[last]} ${fmt(values[last] as number)}로, 범위 ${fmt(Math.min(...vals))}–${fmt(Math.max(...vals))}`;
+}
+
 export default function LineChart({ dates, series, height = 220, unit = "", digits = 2, reference, ariaLabel }: Props) {
   const [hover, setHover] = useState<number | null>(null);
   const [width, setWidth] = useState(640);
@@ -102,7 +115,7 @@ export default function LineChart({ dates, series, height = 220, unit = "", digi
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={ariaLabel}
+        aria-label={`${ariaLabel}: ${trendSummary(dates, series[0]?.values ?? [], (v) => fmt(v))}`}
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
         style={{ display: "block", touchAction: "pan-y" }}

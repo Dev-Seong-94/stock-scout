@@ -24,7 +24,7 @@ export function RangeBar({
   const span = high - low || 1;
   const pos = Math.min(100, Math.max(0, ((value - low) / span) * 100));
   return (
-    <div className="range" aria-label={`${label} ${format(low)}–${format(high)}, ${middle}`}>
+    <div className="range" role="img" aria-label={`${label} ${format(low)}–${format(high)}, ${middle}`}>
       <div className="range__track">
         <span className="range__mark" style={{ left: `${pos}%` }} />
       </div>

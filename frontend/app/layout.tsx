@@ -14,7 +14,8 @@ const plex = IBM_Plex_Sans_KR({
 });
 
 export const metadata: Metadata = {
-  title: "Stock Scout",
+  // Each section sets its own title so open tabs can be told apart ("NVDA · Stock Scout").
+  title: { default: "Stock Scout", template: "%s · Stock Scout" },
   description: "거시 환경을 보면서 지표로 종목을 좁혀 가는 개인 리서치 도구",
 };
 

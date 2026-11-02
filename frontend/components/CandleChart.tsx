@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { niceTicks, PAD, type ChartSeries } from "@/components/LineChart";
+import { niceTicks, PAD, trendSummary, type ChartSeries } from "@/components/LineChart";
 import { num, signed } from "@/lib/format";
 
 type Props = {
@@ -120,7 +120,7 @@ export default function CandleChart({ dates, open, high, low, close, volume, ove
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={ariaLabel}
+        aria-label={`${ariaLabel} (종가): ${trendSummary(dates, close, (v) => num(v, digits))}`}
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
         style={{ display: "block", touchAction: "pan-y" }}

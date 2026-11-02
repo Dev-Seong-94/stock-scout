@@ -444,7 +444,10 @@ export default function Dashboard() {
         ))}
       </section>
 
-      <section className="indicators" aria-label="주요 지표">
+      <h2 id="indicators-title" className="sr-only">
+        주요 지표
+      </h2>
+      <section className="indicators" aria-labelledby="indicators-title">
         {loading
           ? Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="panel ind">
