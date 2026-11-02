@@ -10,7 +10,7 @@ import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Tabs } from "@/componen
 import { useApi } from "@/lib/api";
 import { metricCell, metricValue, num, price, relativeTime, sectorRank } from "@/lib/format";
 import { notables } from "@/lib/notables";
-import { useWatchlist } from "@/lib/storage";
+import { COMPARE_MAX, useCompare, useWatchlist } from "@/lib/storage";
 import type { Article, Catalog, Filing, Ownership, PriceHistory, StockDetail, Valuation, ValuationRange } from "@/lib/types";
 
 type RangeKey = "1m" | "3m" | "6m" | "1y" | "3y" | "5y";
@@ -522,6 +522,8 @@ export default function StockPage() {
   const [tab, setTab] = useState<TabKey>("flow");
   const d = detail.data;
   const watched = watch.has(symbol);
+  const compare = useCompare();
+  const comparing = compare.has(symbol);
 
   return (
     <>
@@ -556,6 +558,20 @@ export default function StockPage() {
           >
             {watched ? "★ 관심종목" : "☆ 관심종목에 추가"}
           </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!comparing && compare.full}
+            title={!comparing && compare.full ? `비교함은 ${COMPARE_MAX}개까지예요` : undefined}
+            onClick={() => compare.toggle(symbol)}
+          >
+            {comparing ? "✓ 비교함에 담김" : "+ 비교함에 담기"}
+          </button>
+          {compare.symbols.length >= 2 && comparing ? (
+            <Link className="btn btn--ghost small" href="/compare">
+              비교 보기 ({compare.symbols.length})
+            </Link>
+          ) : null}
         </div>
       </div>
 

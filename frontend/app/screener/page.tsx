@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { CriteriaForm, CriteriaSummary } from "@/components/MyCriteria";
 import { ErrorNote, InfoTip, Skeleton, WatchStar } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
+import { focusMetrics, presetFit, SHORT_HORIZON_NOTE, type Profile } from "@/lib/criteria";
 import { direction, metricCell, metricValue, price, relativeTime, unitSuffix } from "@/lib/format";
-import { useSavedPresets, useWatchlist } from "@/lib/storage";
+import { COMPARE_MAX, useCompare, useProfile, useSavedPresets, useWatchlist } from "@/lib/storage";
 import { SECTOR_SUFFIX } from "@/lib/types";
 import type { Catalog, Filters, Metric, Preset, Range, ScreenResult } from "@/lib/types";
 
@@ -158,32 +160,90 @@ function describeRange(key: string, r: Range, m: Metric) {
   return `${metricValue(hi, m.unit)} 이하`;
 }
 
-/** First screen: example combinations as a starting point instead of 38 empty filters. */
-function StartHere({ presets, onPick, onSkip }: { presets: Preset[]; onPick: (p: Preset) => void; onSkip: () => void }) {
+/** First screen: the "내 기준" questions, then example combinations ordered by them. */
+function StartHere({
+  presets,
+  profile,
+  onPick,
+  onSkip,
+}: {
+  presets: Preset[];
+  profile: Profile | null;
+  onPick: (p: Preset) => void;
+  onSkip: () => void;
+}) {
+  const fits = new Map(presets.map((p) => [p.id, profile ? presetFit(p.id, profile) : null]));
+  const ordered = profile ? [...presets].sort((a, b) => (fits.get(b.id)?.score ?? 0) - (fits.get(a.id)?.score ?? 0)) : presets;
   return (
     <section className="panel start-here" aria-labelledby="start-here-title">
       <div className="start-here__head">
         <div>
           <h2 id="start-here-title">어디서 시작할까요?</h2>
           <p className="small muted">
-            예시 조합을 하나 고르면 조건이 채워지고, 왼쪽에서 숫자를 바꿔 볼 수 있어요. 추천이 아니라 거르는 방법의 예시예요.
+            {profile
+              ? "내 기준에 맞춰 예시 조합의 순서를 바꿨어요. 추천이 아니라 거르는 방법의 예시예요."
+              : "먼저 세 가지만 답해 주세요. 답에 맞춰 예시 조합과 먼저 볼 지표를 앞에 놓아 드려요."}
           </p>
         </div>
         <button type="button" className="btn btn--ghost small" onClick={onSkip}>
           직접 고를게요
         </button>
       </div>
+      {profile ? <CriteriaSummary /> : <CriteriaForm />}
+      {profile?.horizon === "short" ? <p className="note small">{SHORT_HORIZON_NOTE}</p> : null}
       <ul className="start-here__list">
-        {presets.map((p) => (
-          <li key={p.id}>
-            <button type="button" className="start-card" onClick={() => onPick(p)}>
-              <b>{p.name}</b>
-              {p.note ? <span className="small muted">{p.note}</span> : null}
-            </button>
-          </li>
-        ))}
+        {ordered.map((p) => {
+          const fit = fits.get(p.id);
+          return (
+            <li key={p.id}>
+              <button type="button" className={`start-card ${fit && fit.score < 1 ? "is-dim" : ""}`} onClick={() => onPick(p)}>
+                {fit?.goal ? <span className="start-card__badge small">기대와 맞아요</span> : null}
+                <b>{p.name}</b>
+                {p.note ? <span className="small muted">{p.note}</span> : null}
+                {fit?.warnings.map((w) => (
+                  <span key={w} className="start-card__warn small">
+                    {w}
+                  </span>
+                ))}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </section>
+  );
+}
+
+/** Sticky bar while stocks are picked for the side-by-side view. */
+function CompareBar() {
+  const compare = useCompare();
+  if (!compare.symbols.length) return null;
+  return (
+    <div className="compare-bar" role="region" aria-label="비교함">
+      <span className="small">
+        비교함 <b>{compare.symbols.length}</b>/{COMPARE_MAX}
+      </span>
+      <span className="compare-bar__list small">
+        {compare.symbols.map((s) => (
+          <span key={s} className="chip">
+            {s}
+            <button type="button" aria-label={`${s} 비교함에서 빼기`} onClick={() => compare.toggle(s)}>
+              ×
+            </button>
+          </span>
+        ))}
+      </span>
+      <button type="button" className="btn btn--ghost small" onClick={() => compare.set([])}>
+        비우기
+      </button>
+      {compare.symbols.length < 2 ? (
+        <span className="small muted">하나 더 담으면 비교할 수 있어요</span>
+      ) : (
+        <Link className="btn btn--primary" href="/compare">
+          나란히 비교하기
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -253,6 +313,8 @@ function Screener() {
   const catalogReq = useApi<Catalog>("/api/screener/metrics");
   const catalog = catalogReq.data;
   const watch = useWatchlist();
+  const compare = useCompare();
+  const [profile] = useProfile();
   const [saved, setSaved] = useSavedPresets();
 
   const [filters, setFilters] = useState<Filters>({});
@@ -275,7 +337,9 @@ function Screener() {
 
   const metricsByKey = useMemo(() => new Map((catalog?.metrics ?? []).map((m) => [m.key, m])), [catalog]);
   const activeKeys = Object.keys(filters).filter((k) => isActive(filters[k]));
-  const columns = useMemo(() => [...new Set([...activeKeys.map(baseKey), ...DEFAULT_COLUMNS])].filter((k) => metricsByKey.has(k)), [activeKeys.join(), metricsByKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const focus = useMemo(() => (profile ? focusMetrics(profile) : []), [profile]);
+  const baseColumns = profile ? ["market_cap", ...focus] : DEFAULT_COLUMNS;
+  const columns = useMemo(() => [...new Set([...activeKeys.map(baseKey), ...baseColumns])].filter((k) => metricsByKey.has(k)), [activeKeys.join(), baseColumns.join(), metricsByKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const filteredColumns = new Set(activeKeys.map(baseKey));
   // RSI capped low or price far below its high → looking at stocks that fell a lot.
   const lookingAtFallen =
@@ -514,11 +578,14 @@ function Screener() {
             />
           </div>
 
-          {catalog.groups.map((g) => {
-            const metrics = catalog.metrics.filter((m) => m.group === g.key && matchesQuery(m));
+          {(focus.length && !mq ? [{ key: "mine", label: "내 기준으로 먼저 볼 지표" }, ...catalog.groups] : catalog.groups).map((g) => {
+            const metrics =
+              g.key === "mine"
+                ? focus.map((k) => metricsByKey.get(k)).filter((m): m is Metric => !!m)
+                : catalog.metrics.filter((m) => m.group === g.key && matchesQuery(m));
             if (mq && !metrics.length) return null;
             const count = metrics.filter((m) => isActive(filters[m.key]) || isActive(filters[m.key + SECTOR_SUFFIX])).length;
-            const open = mq ? true : (openGroups[g.key] ?? count > 0);
+            const open = mq ? true : (openGroups[g.key] ?? (g.key === "mine" || count > 0));
             return (
               <div key={g.key} className="filters__group">
                 <button
@@ -642,6 +709,7 @@ function Screener() {
           {showStart ? (
             <StartHere
               presets={catalog.presets}
+              profile={profile}
               onPick={applyPreset}
               onSkip={() => {
                 setSkipStart(true);
@@ -649,6 +717,8 @@ function Screener() {
               }}
             />
           ) : null}
+
+          {!showStart && profile ? <CriteriaSummary /> : null}
 
           {skipped.length ? (
             <p className="note small">
@@ -674,6 +744,9 @@ function Screener() {
             <table className="table">
               <thead>
                 <tr>
+                  <th scope="col" className="cmp-col">
+                    <span title={`최대 ${COMPARE_MAX}개까지 담아 나란히 비교해요`}>비교</span>
+                  </th>
                   <th scope="col">종목</th>
                   <th scope="col" className="left">
                     섹터
@@ -702,12 +775,22 @@ function Screener() {
                     className="row-link"
                     onClick={(e) => {
                       // Let real links, buttons and text selection behave normally.
-                      if ((e.target as HTMLElement).closest("a, button") || window.getSelection()?.toString()) return;
+                      if ((e.target as HTMLElement).closest("a, button, input") || window.getSelection()?.toString()) return;
                       const href = `/stocks/${r.symbol}`;
                       if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
                       else router.push(href);
                     }}
                   >
+                    <td className="cmp-col">
+                      <input
+                        type="checkbox"
+                        aria-label={`${r.symbol} 비교함에 담기`}
+                        checked={compare.has(r.symbol)}
+                        disabled={!compare.has(r.symbol) && compare.full}
+                        onChange={() => compare.toggle(r.symbol)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </td>
                     <td>
                       <Link className="ticker" href={`/stocks/${r.symbol}`}>
                         {r.symbol}
@@ -762,6 +845,7 @@ function Screener() {
           ) : null}
         </section>
       </div>
+      <CompareBar />
     </>
   );
 }

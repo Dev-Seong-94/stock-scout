@@ -50,6 +50,13 @@ def search(body: SearchBody) -> dict:
     )
 
 
+@router.get("/compare")
+def compare(symbols: str = "") -> dict:
+    """Up to 5 stocks side by side: every metric, sector percentiles and sector medians."""
+    wanted = [s.strip() for s in symbols.split(",") if s.strip()][:5]
+    return screener.compare(wanted)
+
+
 @router.post("/refresh")
 def refresh() -> dict:
     started = snapshot.start_background_build(load_universe())

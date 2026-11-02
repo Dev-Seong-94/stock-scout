@@ -8,6 +8,7 @@ import { useUpColor } from "@/lib/storage";
 const LINKS = [
   { href: "/", label: "대시보드" },
   { href: "/screener", label: "스크리너" },
+  { href: "/compare", label: "비교" },
   { href: "/macro", label: "거시·정세" },
   { href: "/watchlist", label: "관심종목" },
 ];

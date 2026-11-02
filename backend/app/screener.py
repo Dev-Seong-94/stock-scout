@@ -226,3 +226,22 @@ def sector_peers(sector: str | None) -> pd.DataFrame | None:
         return None
     df = primary(df)
     return df[df["sector"] == sector]
+
+
+def compare(symbols: list[str]) -> dict:
+    """Snapshot rows for a few stocks side by side, with each one's sector median."""
+    df = frame()
+    if df is None:
+        return {"rows": [], "medians": {}, "ready": False}
+    wanted = [s.upper() for s in symbols]
+    hit = df[df["symbol"].isin(wanted)]
+    hit = hit.assign(_order=hit["symbol"].map(wanted.index)).sort_values("_order").drop(columns="_order")
+    medians = {}
+    for sector in hit["sector"].dropna().unique():
+        peers = sector_peers(sector)
+        medians[sector] = {
+            m.key: round(float(v), 4)
+            for m in METRICS
+            if m.key in peers.columns and pd.notna(v := usable(peers, m.key).median())
+        }
+    return {"rows": _records(hit), "medians": medians, "ready": True, "missing": [s for s in wanted if s not in set(hit["symbol"])]}

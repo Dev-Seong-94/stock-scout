@@ -1,13 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
 import { Change, ErrorNote } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { price, shortDate, signed } from "@/lib/format";
-import { useWatchlist } from "@/lib/storage";
+import { COMPARE_MAX, useCompare, useWatchlist } from "@/lib/storage";
 import type { Performance, Quote, WatchItem } from "@/lib/types";
+
+// What to have looked at before trusting a pick. Ticked boxes are saved per stock.
+const WATCH_CHECKS = [
+  { key: "business", label: "무엇으로 돈을 버는지 한 문장으로 말할 수 있어요", where: "종목 화면 → 회사 소개" },
+  { key: "filings", label: "최근 실적 발표(8-K)나 분기 보고서(10-Q)를 훑어봤어요", where: "종목 화면 → 공시" },
+  { key: "news", label: "최근 1~2주 뉴스를 확인했어요", where: "종목 화면 → 뉴스" },
+  { key: "peers", label: "비슷한 회사와 나란히 비교해 봤어요", where: "비교 화면" },
+  { key: "exit", label: "어떤 일이 생기면 생각을 바꿀지 적어 뒀어요", where: "아래 메모" },
+] as const;
+
+const today = () => new Date().toISOString().slice(0, 10);
 
 function AddForm({ onAdd }: { onAdd: (symbol: string) => void }) {
   const [value, setValue] = useState("");
@@ -73,6 +85,9 @@ function Row({
   onChange: (p: Partial<WatchItem>) => void;
   onRemove: () => void;
 }) {
+  const checks = item.checks ?? {};
+  const done = WATCH_CHECKS.filter((c) => checks[c.key]).length;
+  const due = !!item.revisit && item.revisit <= today();
   const since = perf?.change_pct ?? (quote?.price && item.priceAtAdd ? (quote.price / item.priceAtAdd - 1) * 100 : null);
   const basePrice = perf?.base_price ?? item.priceAtAdd;
   return (
@@ -100,6 +115,7 @@ function Row({
             <span className="muted">비교는 다음 거래일부터</span>
           ) : null}
           <span className="muted">{shortDate(item.addedAt)} 추가</span>
+          {due ? <span className="badge-due">다시 볼 날이에요</span> : null}
           <button type="button" className="btn btn--ghost small" onClick={onRemove}>
             삭제
           </button>
@@ -125,13 +141,50 @@ function Row({
             onChange={(e) => onChange({ memo: e.target.value })}
           />
         </label>
+        <label>
+          <span className="small muted">마음에 걸리는 점</span>
+          <input
+            className="input"
+            placeholder="예: 매출이 고객 한 곳에 몰려 있음, 최근 임원 매도가 많음"
+            value={item.concern ?? ""}
+            onChange={(e) => onChange({ concern: e.target.value })}
+          />
+        </label>
+        <label>
+          <span className="small muted">다시 볼 날</span>
+          <input
+            className="input"
+            type="date"
+            value={item.revisit ?? ""}
+            onChange={(e) => onChange({ revisit: e.target.value || undefined })}
+          />
+        </label>
       </div>
+      <details className="watch-checks" open={done < WATCH_CHECKS.length}>
+        <summary className="small">
+          확인 목록 <b>{done}</b>/{WATCH_CHECKS.length}
+          {done === WATCH_CHECKS.length ? " · 다 확인했어요" : ""}
+        </summary>
+        <ul>
+          {WATCH_CHECKS.map((c) => (
+            <li key={c.key}>
+              <label>
+                <input type="checkbox" checked={!!checks[c.key]} onChange={(e) => onChange({ checks: { ...checks, [c.key]: e.target.checked } })} />
+                <span>{c.label}</span>
+                <span className="small muted"> · {c.where}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </details>
     </li>
   );
 }
 
 export default function WatchlistPage() {
   const watch = useWatchlist();
+  const compare = useCompare();
+  const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const symbols = watch.items.map((i) => i.symbol).join(",");
@@ -169,6 +222,19 @@ export default function WatchlistPage() {
       <div className="page-head">
         <h1>관심종목</h1>
         <div className="watch-tools">
+          {watch.items.length >= 2 ? (
+            <button
+              className="btn"
+              type="button"
+              title={`위에서부터 ${COMPARE_MAX}개까지 비교함에 담아요`}
+              onClick={() => {
+                compare.set(watch.items.slice(0, COMPARE_MAX).map((i) => i.symbol));
+                router.push("/compare");
+              }}
+            >
+              나란히 비교
+            </button>
+          ) : null}
           <button className="btn" type="button" onClick={exportJson} disabled={!watch.items.length}>
             내보내기
           </button>
@@ -190,6 +256,19 @@ export default function WatchlistPage() {
       {quotes.error ? <ErrorNote message={quotes.error} onRetry={quotes.reload} /> : null}
 
       {watch.items.length ? <Review perf={perf} /> : null}
+
+      {watch.items.some((i) => i.revisit && i.revisit <= today()) ? (
+        <p className="note small">
+          다시 볼 날이 된 종목:{" "}
+          <b>
+            {watch.items
+              .filter((i) => i.revisit && i.revisit <= today())
+              .map((i) => i.symbol)
+              .join(", ")}
+          </b>
+          . 관심 사유가 아직 맞는지, 마음에 걸리던 점이 어떻게 됐는지 확인해 보세요.
+        </p>
+      ) : null}
 
       {watch.items.length ? (
         <ul className="watch-list">

@@ -102,6 +102,7 @@ def test_filters_ranges_sectors_query():
 
 
 def test_catalog_consistency():
+    assert all(m.prefer in ("", "high", "low") for m in METRICS)
     keys = [m.key for m in METRICS]
     assert len(keys) == len(set(keys))
     for m in METRICS:
@@ -220,6 +221,28 @@ def test_share_classes_counted_once(monkeypatch):
     assert screener.sector_percentiles("GOOG")["roe"] == pytest.approx(100.0)
     assert screener.sector_percentiles("A")["roe"] == pytest.approx(20.0)
     assert screener.run(query="goog")["total"] == 2  # searching by ticker finds both classes
+    screener.set_frame(None)
+
+
+
+def test_compare_keeps_order_and_gives_sector_medians(monkeypatch):
+    df = pd.DataFrame(
+        {
+            "symbol": ["A", "B", "C", "D", "E"],
+            "name": list("abcde"),
+            "sector": ["Tech"] * 5,
+            "avg_dollar_volume": [1.0] * 5,
+            "pe": [10.0, 20.0, -5.0, 40.0, 30.0],
+            "roe": [1.0, 2.0, 3.0, 4.0, 5.0],
+        }
+    )
+    monkeypatch.setattr(screener, "frame", lambda: screener._frame)
+    screener.set_frame(df)
+    out = screener.compare(["d", "A", "ZZZ"])
+    assert [r["symbol"] for r in out["rows"]] == ["D", "A"]
+    assert out["missing"] == ["ZZZ"]
+    assert out["medians"]["Tech"]["pe"] == pytest.approx(25.0)  # the negative PER is left out
+    assert out["rows"][0]["roe@sector"] == pytest.approx(80.0)
     screener.set_frame(None)
 
 

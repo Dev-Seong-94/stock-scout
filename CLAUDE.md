@@ -43,7 +43,9 @@ frontend/  Next.js 16 App Router, React 19, plain CSS (app/globals.css tokens)
   app/screener/page.tsx        filters + results table (rows clickable)
   app/stocks/[symbol]/page.tsx detail: chart, metric cards vs sector median, flow, news, filings
   app/macro/page.tsx           FRED trends, 30-day calendar, geopolitics (GDELT)
-  app/watchlist/page.tsx       watchlist with reason/memo
+  app/compare/page.tsx         up to 5 stocks side by side (picked in screener / stock page)
+  app/watchlist/page.tsx       watchlist with reason/memo, concern, revisit date, 5-item checklist
+  lib/criteria.ts              "내 기준" (horizon, drawdown, goal) → preset order + focus metrics
   components/LineChart.tsx     hand-rolled SVG chart (no chart library)
   components/CandleChart.tsx   candlesticks + volume + moving averages (stock page default)
 ```
@@ -127,6 +129,11 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
   `data/insiders/days/`; first backfill of 6 weeks ≈ 25 min in a background
   thread at server start. Baseline = SEC Insider Transactions Data Sets (last
   4 published quarters, which lag by months).
+- Narrowing flow (2026-10-31): "내 기준" answers (localStorage) only reorder
+  example combinations and put focus metrics first; they never filter. The
+  compare view highlights the side a metric is *conventionally* read as
+  favourable (`Metric.prefer`; prices, size and dividends have none) and
+  says it is a reading direction, not a verdict.
 - "적자 성장주 점검" metrics: cash_runway (months; None when not burning cash),
   share_change_1y (diluted shares YoY), gross_margin_change (%p YoY). They need
   a full snapshot rebuild to appear in the screener.

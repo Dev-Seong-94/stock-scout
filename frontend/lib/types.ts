@@ -72,6 +72,7 @@ export type Metric = {
   slider_max: number;
   step: number;
   positive_only: boolean;
+  prefer: "high" | "low" | ""; // side usually read as favourable
 };
 
 export type Range = [number | null, number | null];
@@ -210,6 +211,16 @@ export type WatchItem = {
   priceAtAdd?: number | null;
   reason: string;
   memo: string;
+  checks?: Record<string, boolean>; // WATCH_CHECKS keys done
+  concern?: string; // what bothers me about it
+  revisit?: string; // YYYY-MM-DD: look at it again then
+};
+
+export type CompareResult = {
+  rows: ScreenRow[];
+  medians: Record<string, Record<string, number>>; // sector → metric → median
+  ready: boolean;
+  missing?: string[];
 };
 
 export type InsiderWeek = {

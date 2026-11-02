@@ -8,7 +8,7 @@ computing it in snapshot.py) is all that is needed to make it filterable.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,9 @@ class Metric:
     # Multiples like PER are meaningless when ≤ 0 (losses, negative equity):
     # such values are left out of filters, percentiles and medians.
     positive_only: bool = False
+    # Which side is usually read as favourable ("high" / "low"), for the compare
+    # view's highlight. "" = neither (prices, size, dividends: depends on why).
+    prefer: str = ""
 
 
 GROUPS = [
@@ -277,6 +280,15 @@ METRICS: list[Metric] = [
         -30, 30, 1,
     ),
 ]
+
+# Conventional reading only: cheaper, more profitable, faster growing, sturdier.
+_PREFER_HIGH = {
+    "fcf_yield", "roe", "roa", "gross_margin", "operating_margin", "net_margin",
+    "revenue_growth", "earnings_growth", "revenue_cagr_3y",
+    "current_ratio", "interest_coverage", "cash_runway", "gross_margin_change",
+}
+_PREFER_LOW = {"pe", "forward_pe", "peg", "pb", "ps", "ev_ebitda", "debt_to_equity", "share_change_1y"}
+METRICS = [replace(m, prefer="high" if m.key in _PREFER_HIGH else "low" if m.key in _PREFER_LOW else "") for m in METRICS]
 
 METRIC_KEYS = {m.key for m in METRICS}
 

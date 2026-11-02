@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import type { Profile } from "./criteria";
 import type { Preset, WatchItem } from "./types";
 
 // Everything personal lives in this browser only (localStorage).
@@ -10,6 +11,8 @@ const KEYS = {
   watchlist: "stockscout.watchlist.v1",
   presets: "stockscout.presets.v1",
   upColor: "stockscout.upColor",
+  profile: "stockscout.profile.v1",
+  compare: "stockscout.compare.v1",
 };
 
 function read<T>(key: string, fallback: T): T {
@@ -101,4 +104,22 @@ export function useUpColor() {
     document.documentElement.dataset.up = color;
   }, [color]);
   return [color, setColor] as const;
+}
+
+export function useProfile() {
+  return useStored<Profile | null>(KEYS.profile, null);
+}
+
+export const COMPARE_MAX = 5;
+
+/** The stocks picked for the side-by-side view (at most COMPARE_MAX). */
+export function useCompare() {
+  const [symbols, setSymbols] = useStored<string[]>(KEYS.compare, []);
+  const has = useCallback((s: string) => symbols.includes(s), [symbols]);
+  const toggle = useCallback(
+    (s: string) =>
+      setSymbols((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : prev.length >= COMPARE_MAX ? prev : [...prev, s])),
+    [setSymbols],
+  );
+  return { symbols, has, toggle, set: setSymbols, full: symbols.length >= COMPARE_MAX };
 }
