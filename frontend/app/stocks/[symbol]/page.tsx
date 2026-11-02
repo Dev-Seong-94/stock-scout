@@ -20,7 +20,7 @@ type TabKey = "flow" | "news" | "filings";
 function PriceChart({ symbol }: { symbol: string }) {
   const [range, setRange] = useState<RangeKey>("6m");
   const [kind, setKind] = useState<ChartKind>("candle");
-  const { data, error, loading } = useApi<PriceHistory>(`/api/stocks/${symbol}/history?range=${range}`);
+  const { data, error, loading, reload } = useApi<PriceHistory>(`/api/stocks/${symbol}/history?range=${range}`);
   const first = data?.close.find((v) => v !== null) ?? null;
   const last = data ? [...data.close].reverse().find((v) => v !== null) ?? null : null;
   const change = first && last ? (last / first - 1) * 100 : null;
@@ -53,7 +53,7 @@ function PriceChart({ symbol }: { symbol: string }) {
         </div>
       </div>
       <div className="panel__body">
-        {error ? <ErrorNote message={error} /> : null}
+        {error ? <ErrorNote message={error} onRetry={reload} /> : null}
         {loading && !data ? <Skeleton height={280} /> : null}
         {data && kind === "candle" ? (
           <>
@@ -101,13 +101,17 @@ function PriceChart({ symbol }: { symbol: string }) {
 }
 
 function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalog }) {
+  const built = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
+  const snapshotDate = built ? `${built.getMonth() + 1}/${built.getDate()}` : null;
   return (
     <section aria-labelledby="metrics-title">
       <div className="section-head">
         <h2 id="metrics-title">지표</h2>
         {detail.peer_count ? (
           <p className="small muted">
-            회색 숫자는 같은 섹터({detail.sector_label}) {detail.peer_count}개 종목의 중앙값이고, 그 아래는 섹터 안 순위예요 (스크리너 데이터 기준).
+            카드의 큰 숫자는 방금 불러온 값이에요. 회색 숫자는 같은 섹터({detail.sector_label}) {detail.peer_count}개 종목의 중앙값이고, 그 아래는 섹터 안
+            순위예요. 섹터 비교는{" "}
+            <b>{snapshotDate ? `스크리너 데이터(${snapshotDate}) 기준` : "스크리너 데이터 기준"}</b>이라 큰 숫자와 시점이 달라요.
           </p>
         ) : null}
       </div>
@@ -254,7 +258,9 @@ function OwnValuation({ label, unit, range }: { label: string; unit: string; ran
   return (
     <div>
       <h3>
-        <span>{label}</span>
+        <span>
+          {label} <span className="small muted">직전 회계연도 실적 기준</span>
+        </span>
         <span>{range?.current != null ? metricValue(range.current, unit) : "–"}</span>
       </h3>
       {range && range.current != null ? (
@@ -283,14 +289,14 @@ function OwnValuation({ label, unit, range }: { label: string; unit: string; ran
 }
 
 function ValuationHistory({ symbol }: { symbol: string }) {
-  const { data, error, loading } = useApi<Valuation>(`/api/stocks/${symbol}/valuation`);
+  const { data, error, loading, reload } = useApi<Valuation>(`/api/stocks/${symbol}/valuation`);
   return (
     <section className="panel" aria-labelledby="own-valuation-title">
       <div className="panel__head">
         <h2 id="own-valuation-title">자기 과거와 비교한 밸류에이션</h2>
       </div>
       <div className="panel__body">
-        {error ? <ErrorNote message={error} /> : null}
+        {error ? <ErrorNote message={error} onRetry={reload} /> : null}
         {loading && !data ? <Skeleton height={80} /> : null}
         {data ? (
           <>
@@ -299,8 +305,8 @@ function ValuationHistory({ symbol }: { symbol: string }) {
               <OwnValuation label="PSR" unit="x" range={data.ps} />
             </div>
             <p className="small muted" style={{ marginTop: 12 }}>
-              매주 주가를 그 시점에 발표돼 있던 연간 실적으로 나눈 값이에요. 연간 실적 기준이라 위 카드(최근 12개월)와 조금 달라요. 과거보다 높다고 꼭
-              비싼 건 아니에요: 성장 속도나 금리가 달라졌을 수 있어요.
+              매주 주가를 그 시점에 발표돼 있던 연간 실적으로 나눈 값이에요. 아래 지표 카드의 PER·PSR은 최근 12개월 실적 기준이라 숫자가 달라요. 실적이
+              빠르게 늘거나 줄어드는 회사일수록 차이가 커요. 과거보다 높다고 꼭 비싼 건 아니에요: 성장 속도나 금리가 달라졌을 수 있어요.
             </p>
           </>
         ) : null}
@@ -310,8 +316,8 @@ function ValuationHistory({ symbol }: { symbol: string }) {
 }
 
 function Flow({ symbol }: { symbol: string }) {
-  const { data, error, loading } = useApi<Ownership>(`/api/stocks/${symbol}/ownership`);
-  if (error) return <ErrorNote message={error} />;
+  const { data, error, loading, reload } = useApi<Ownership>(`/api/stocks/${symbol}/ownership`);
+  if (error) return <ErrorNote message={error} onRetry={reload} />;
   if (loading || !data) return <Skeleton height={200} />;
   return (
     <div className="grid">
@@ -403,8 +409,8 @@ function Flow({ symbol }: { symbol: string }) {
 }
 
 function News({ symbol }: { symbol: string }) {
-  const { data, error, loading } = useApi<{ articles: Article[] }>(`/api/stocks/${symbol}/news`);
-  if (error) return <ErrorNote message={error} />;
+  const { data, error, loading, reload } = useApi<{ articles: Article[] }>(`/api/stocks/${symbol}/news`);
+  if (error) return <ErrorNote message={error} onRetry={reload} />;
   if (loading || !data) return <Skeleton height={200} />;
   if (!data.articles.length) return <p className="muted small">최근 2주 안의 기사를 찾지 못했어요.</p>;
   return (
@@ -430,9 +436,9 @@ const INSIDER_FORMS = ["3", "4", "5", "144"];
 const baseForm = (form: string) => form.replace(/\/A$/, "");
 
 function Filings({ symbol }: { symbol: string }) {
-  const { data, error, loading } = useApi<{ filings: Filing[] }>(`/api/stocks/${symbol}/filings`);
+  const { data, error, loading, reload } = useApi<{ filings: Filing[] }>(`/api/stocks/${symbol}/filings`);
   const [view, setView] = useState<FilingView>("all");
-  if (error) return <ErrorNote message={error} />;
+  if (error) return <ErrorNote message={error} onRetry={reload} />;
   if (loading || !data) return <Skeleton height={200} />;
   const rows = data.filings.filter((f) =>
     view === "main" ? MAIN_FORMS.includes(baseForm(f.form)) : view === "insider" ? INSIDER_FORMS.includes(baseForm(f.form)) : true,

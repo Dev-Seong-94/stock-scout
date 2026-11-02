@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { CriteriaForm, CriteriaSummary } from "@/components/MyCriteria";
 import { ErrorNote, InfoTip, Skeleton, WatchStar } from "@/components/ui";
@@ -172,10 +172,13 @@ function StartHere({
   onPick: (p: Preset) => void;
   onSkip: () => void;
 }) {
+  // Names only by default so the results table stays near the top; the notes
+  // and warnings are one click away (and in each button's tooltip).
+  const [detailed, setDetailed] = useState(false);
   const fits = new Map(presets.map((p) => [p.id, profile ? presetFit(p.id, profile) : null]));
   const ordered = profile ? [...presets].sort((a, b) => (fits.get(b.id)?.score ?? 0) - (fits.get(a.id)?.score ?? 0)) : presets;
   return (
-    <section className="panel start-here" aria-labelledby="start-here-title">
+    <section className={`panel start-here ${detailed ? "" : "start-here--compact"}`} aria-labelledby="start-here-title">
       <div className="start-here__head">
         <div>
           <h2 id="start-here-title">어디서 시작할까요?</h2>
@@ -191,20 +194,35 @@ function StartHere({
       </div>
       {profile ? <CriteriaSummary /> : <CriteriaForm />}
       {profile?.horizon === "short" ? <p className="note small">{SHORT_HORIZON_NOTE}</p> : null}
+      <div className="start-here__presets-head">
+        <h3 className="small">예시 조합</h3>
+        <button type="button" className="btn btn--ghost small" aria-expanded={detailed} onClick={() => setDetailed((d) => !d)}>
+          {detailed ? "이름만 보기" : "설명 함께 보기"}
+        </button>
+      </div>
       <ul className="start-here__list">
         {ordered.map((p) => {
           const fit = fits.get(p.id);
+          const warnings = fit?.warnings ?? [];
           return (
             <li key={p.id}>
-              <button type="button" className={`start-card ${fit && fit.score < 1 ? "is-dim" : ""}`} onClick={() => onPick(p)}>
+              <button
+                type="button"
+                className={`start-card ${fit && fit.score < 1 ? "is-dim" : ""}`}
+                title={detailed ? undefined : [p.note, ...warnings].filter(Boolean).join("\n") || undefined}
+                onClick={() => onPick(p)}
+              >
                 {fit?.goal ? <span className="start-card__badge small">기대와 맞아요</span> : null}
                 <b>{p.name}</b>
-                {p.note ? <span className="small muted">{p.note}</span> : null}
-                {fit?.warnings.map((w) => (
-                  <span key={w} className="start-card__warn small">
-                    {w}
-                  </span>
-                ))}
+                {!detailed && warnings.length ? <span className="start-card__warn small">주의 {warnings.length}</span> : null}
+                {detailed && p.note ? <span className="small muted">{p.note}</span> : null}
+                {detailed
+                  ? warnings.map((w) => (
+                      <span key={w} className="start-card__warn small">
+                        {w}
+                      </span>
+                    ))
+                  : null}
               </button>
             </li>
           );
@@ -212,6 +230,27 @@ function StartHere({
       </ul>
     </section>
   );
+}
+
+/**
+ * True when the table is wider than its box. Only then does the box scroll
+ * sideways; otherwise it stays a plain block so the header can stick to the
+ * page instead of an inner scroll area.
+ */
+function useIsWide(boxRef: RefObject<HTMLDivElement | null>, remountKey: unknown) {
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const table = box?.querySelector("table");
+    if (!box || !table) return;
+    const measure = () => setWide(table.scrollWidth > box.clientWidth + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    ro.observe(table);
+    return () => ro.disconnect();
+  }, [boxRef, remountKey]);
+  return wide;
 }
 
 /** Sticky bar while stocks are picked for the side-by-side view. */
@@ -334,6 +373,8 @@ function Screener() {
   const [showFilters, setShowFilters] = useState(false); // only matters on narrow screens
   const [sectorMode, setSectorMode] = useState<Record<string, boolean>>({});
   const [presetChecklist, setPresetChecklist] = useState<{ name: string; items: string[] } | null>(null);
+  const tableBox = useRef<HTMLDivElement>(null);
+  const tableWide = useIsWide(tableBox, catalog ? (catalog.snapshot?.built_at ?? "no-snapshot") : null);
 
   const metricsByKey = useMemo(() => new Map((catalog?.metrics ?? []).map((m) => [m.key, m])), [catalog]);
   const activeKeys = Object.keys(filters).filter((k) => isActive(filters[k]));
@@ -740,14 +781,16 @@ function Screener() {
             </div>
           ) : null}
 
-          <div className="panel table-wrap results__table">
+          <div ref={tableBox} className={`panel results__table ${tableWide ? "is-wide" : ""}`}>
             <table className="table">
               <thead>
                 <tr>
                   <th scope="col" className="cmp-col">
                     <span title={`최대 ${COMPARE_MAX}개까지 담아 나란히 비교해요`}>비교</span>
                   </th>
-                  <th scope="col">종목</th>
+                  <th scope="col" className="left ticker-col">
+                    종목
+                  </th>
                   <th scope="col" className="left">
                     섹터
                   </th>
@@ -791,7 +834,7 @@ function Screener() {
                         onClick={(e) => e.stopPropagation()}
                       />
                     </td>
-                    <td>
+                    <td className="left ticker-col">
                       <Link className="ticker" href={`/stocks/${r.symbol}`}>
                         {r.symbol}
                       </Link>
