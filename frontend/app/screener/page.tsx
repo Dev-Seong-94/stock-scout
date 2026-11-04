@@ -14,7 +14,7 @@ import { ErrorNote, SetupHelp, Skeleton } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { focusMetrics } from "@/lib/criteria";
 import { relativeTime } from "@/lib/format";
-import { useProfile } from "@/lib/storage";
+import { rememberScreenerUrl, useProfile } from "@/lib/storage";
 import { SECTOR_SUFFIX } from "@/lib/types";
 import type { Catalog, Filters, Preset, Range, ScreenResult } from "@/lib/types";
 
@@ -108,6 +108,7 @@ function Screener() {
   useEffect(() => {
     const next = writeUrl({ filters, sectors, query, sort, desc, page, presetId });
     if (next !== window.location.pathname + window.location.search) window.history.replaceState(window.history.state, "", next);
+    rememberScreenerUrl(next);
   }, [filters, sectors, query, sort, desc, page, presetId]);
 
   // Search whenever conditions change (debounced while typing).

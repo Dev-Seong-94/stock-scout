@@ -10,7 +10,7 @@ import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Tabs } from "@/componen
 import { useApi } from "@/lib/api";
 import { metricCell, metricValue, num, price, relativeTime, sectorRank } from "@/lib/format";
 import { notables } from "@/lib/notables";
-import { COMPARE_MAX, useCompare, useWatchlist } from "@/lib/storage";
+import { COMPARE_MAX, useCompare, useLastScreenerUrl, useWatchlist } from "@/lib/storage";
 import type { Article, Catalog, Filing, Ownership, PriceHistory, StockDetail, Valuation, ValuationRange } from "@/lib/types";
 
 type RangeKey = "1m" | "3m" | "6m" | "1y" | "3y" | "5y";
@@ -572,11 +572,12 @@ export default function StockPage() {
   const watched = watch.has(symbol);
   const compare = useCompare();
   const comparing = compare.has(symbol);
+  const screenerUrl = useLastScreenerUrl();
 
   return (
     <>
       <p className="small">
-        <Link href="/screener" className="muted">
+        <Link href={screenerUrl} className="muted">
           ← 스크리너
         </Link>
       </p>

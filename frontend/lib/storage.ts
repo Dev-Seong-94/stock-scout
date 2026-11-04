@@ -123,3 +123,28 @@ export function useCompare() {
   );
   return { symbols, has, toggle, set: setSymbols, full: symbols.length >= COMPARE_MAX };
 }
+
+// The last screener URL (conditions in its query string), kept for this tab only
+// so the stock page's "← 스크리너" link returns to the same results.
+const LAST_SCREENER = "stockscout.lastScreener";
+
+export function rememberScreenerUrl(url: string) {
+  try {
+    window.sessionStorage.setItem(LAST_SCREENER, url);
+  } catch {
+    // storage blocked: the link just falls back to a fresh screener
+  }
+}
+
+export function useLastScreenerUrl(): string {
+  const [url, setUrl] = useState("/screener");
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(LAST_SCREENER);
+      if (saved?.startsWith("/screener")) setUrl(saved);
+    } catch {
+      // keep the default
+    }
+  }, []);
+  return url;
+}
