@@ -385,3 +385,11 @@ def test_yahoo_insider_rows_in_korean():
     assert filing_summary.yahoo_insider_row({"Text": "Purchase at price 10.50 per share."})["detail_ko"] == "주당 $10.50"
     # Unknown wording is kept as-is rather than dropped.
     assert filing_summary.yahoo_insider_row({"Text": "Something New", "Position": "Trustee"})["kind_ko"] == "Something New"
+
+
+def test_form_labels_use_longest_prefix():
+    from app.services.sec import _label
+
+    assert _label("424B5") == "증권 발행 설명서"
+    assert _label("4/A") == "내부자 거래 보고"
+    assert _label("S-3ASR") == "증권 발행 신고"

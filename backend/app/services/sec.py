@@ -60,9 +60,10 @@ def ticker_to_cik() -> dict[str, int]:
 def _label(form: str) -> str:
     if form in FORM_LABELS:
         return FORM_LABELS[form]
-    for prefix, label in FORM_LABELS.items():
+    # Longest prefix first, so 424B5 is a prospectus and not Form 4.
+    for prefix in sorted(FORM_LABELS, key=len, reverse=True):
         if form.startswith(prefix):
-            return label
+            return FORM_LABELS[prefix]
     return ""
 
 
