@@ -731,6 +731,54 @@ textarea {
   color: var(--muted);
 }
 
+.ind--clickable {
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.ind--clickable:hover,
+.ind.is-open {
+  border-color: var(--accent);
+}
+
+.ind__open {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ind.is-open .ind__open {
+  color: var(--accent);
+}
+
+.ind-chart {
+  padding: 1rem 1.125rem 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.ind-chart__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ind-chart__head h2 {
+  font-size: 1.125rem;
+}
+
+.ind-chart__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .ind__value {
   display: flex;
   align-items: center;

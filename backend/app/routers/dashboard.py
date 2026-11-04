@@ -90,6 +90,25 @@ def indicators() -> dict:
     }
 
 
+@router.get("/indicators/{indicator_id}/history")
+@ttl_cache(seconds=10 * 60)
+def indicator_history(indicator_id: str) -> dict:
+    """Daily values for the last 5 years, for the chart a card opens."""
+    spec = next((i for i in INDICATORS if i["id"] == indicator_id), None)
+    if spec is None:
+        raise HTTPException(404, "알 수 없는 지표예요.")
+    try:
+        s = _series_for(spec).dropna()
+    except fred.FredUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {
+        "id": spec["id"],
+        "label": spec["label"],
+        "unit": spec["unit"],
+        "points": [[d.strftime("%Y-%m-%d"), round(float(v), 3)] for d, v in s.items()],
+    }
+
+
 @router.get("/sectors")
 @ttl_cache(seconds=30 * 60)
 def sectors() -> dict:

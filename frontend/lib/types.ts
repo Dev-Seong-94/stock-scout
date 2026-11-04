@@ -18,6 +18,8 @@ export type Indicator = {
   spark?: number[];
 };
 
+export type IndicatorHistory = { id: string; label: string; unit: string; points: [string, number][] };
+
 export type FearGreed = {
   value: number;
   rating: string;

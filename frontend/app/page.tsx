@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+
+import LineChart from "@/components/LineChart";
 
 import { Change, ErrorNote, InfoTip, RangeBar, SetupHelp, Skeleton, Sparkline, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { dayLabel, num, relativeTime, signed } from "@/lib/format";
-import type { Article, CalendarEvent, FearGreed, Indicator, IndicatorsResponse, InsiderFlow, InsiderName, MarginDebt, SectorRow } from "@/lib/types";
+import type { Article, CalendarEvent, FearGreed, Indicator, IndicatorHistory, IndicatorsResponse, InsiderFlow, InsiderName, MarginDebt, SectorRow } from "@/lib/types";
 
 function percentileText(p: number | null | undefined) {
   if (p === null || p === undefined) return "";
@@ -20,13 +22,29 @@ function IndicatorRange({ ind }: { ind: Indicator }) {
   return <RangeBar low={ind.low_5y} high={ind.high_5y} value={ind.value} middle={percentileText(ind.percentile_5y)} label="5년 범위" />;
 }
 
-function IndicatorCard({ ind }: { ind: Indicator }) {
+function IndicatorCard({ ind, open, onToggle }: { ind: Indicator; open: boolean; onToggle: () => void }) {
   const digits = ind.unit === "%" || ind.unit === "%p" ? 2 : (ind.value ?? 0) >= 1000 ? 0 : 2;
   const changeSuffix = ind.change_kind === "pct" ? "%" : ind.unit === "%" || ind.unit === "%p" ? "%p" : "";
+  const clickable = !ind.error;
   return (
-    <article className="panel ind">
+    <article
+      className={`panel ind${clickable ? " ind--clickable" : ""}${open ? " is-open" : ""}`}
+      // The whole card opens the chart for mouse users; the heading button is the keyboard path.
+      onClick={(e) => {
+        if (clickable && !(e.target as HTMLElement).closest(".info, button")) onToggle();
+      }}
+    >
       <header className="ind__head">
-        <h3>{ind.label}</h3>
+        <h3>
+          {clickable ? (
+            <button type="button" className="ind__open" aria-expanded={open} aria-controls="indicator-chart" onClick={onToggle}>
+              {ind.label}
+              <span className="sr-only"> 차트 {open ? "닫기" : "보기"}</span>
+            </button>
+          ) : (
+            ind.label
+          )}
+        </h3>
         <InfoTip metric={{ label: ind.label, description: ind.about, reading: "", caveat: `출처: ${ind.source}${ind.as_of ? ` · ${ind.as_of} 기준` : ""}` }} />
       </header>
       {ind.error ? (
@@ -53,6 +71,72 @@ function IndicatorCard({ ind }: { ind: Indicator }) {
         </>
       )}
     </article>
+  );
+}
+
+const CHART_PERIODS = [
+  { value: "3m", label: "3개월", months: 3 },
+  { value: "1y", label: "1년", months: 12 },
+  { value: "5y", label: "5년", months: 60 },
+] as const;
+type ChartPeriod = (typeof CHART_PERIODS)[number]["value"];
+
+// A line worth drawing for context: below 0 the curve is inverted.
+const CHART_REFERENCE: Record<string, { value: number; label: string }> = {
+  curve: { value: 0, label: "역전 기준 0" },
+};
+
+/** The bigger chart a card opens: daily values, cut to 3 months / 1 year / 5 years in the browser. */
+function IndicatorChart({ ind, onClose }: { ind: Indicator; onClose: () => void }) {
+  const { data, error, loading, reload } = useApi<IndicatorHistory>(`/api/dashboard/indicators/${ind.id}/history`);
+  const [period, setPeriod] = useState<ChartPeriod>("1y");
+
+  const points = useMemo(() => {
+    const all = data?.points ?? [];
+    if (!all.length) return all;
+    const months = CHART_PERIODS.find((p) => p.value === period)?.months ?? 12;
+    const from = new Date(all[all.length - 1][0]);
+    from.setMonth(from.getMonth() - months);
+    const cut = from.toISOString().slice(0, 10);
+    return all.filter((p) => p[0] >= cut);
+  }, [data, period]);
+
+  const pct = ind.unit === "%" || ind.unit === "%p";
+  const first = points[0]?.[1];
+  const last = points[points.length - 1]?.[1];
+  const change = first != null && last != null ? (ind.change_kind === "pct" ? (last / first - 1) * 100 : last - first) : null;
+  const periodLabel = CHART_PERIODS.find((p) => p.value === period)?.label;
+
+  return (
+    <section id="indicator-chart" className="panel ind-chart" aria-label={`${ind.label} 차트`}>
+      <header className="ind-chart__head">
+        <div>
+          <h2>{ind.label}</h2>
+          <p className="small muted">
+            {periodLabel} 동안 <Change value={change} suffix={ind.change_kind === "pct" ? "%" : pct ? "%p" : ""} /> · 출처 {ind.source}
+          </p>
+        </div>
+        <div className="ind-chart__tools">
+          <Tabs value={period} options={CHART_PERIODS.map(({ value, label }) => ({ value, label }))} onChange={setPeriod} label="기간" />
+          <button type="button" className="btn" onClick={onClose}>
+            닫기
+          </button>
+        </div>
+      </header>
+      {error ? <ErrorNote message={error} onRetry={reload} /> : null}
+      {loading && !data ? <Skeleton height={240} /> : null}
+      {points.length ? (
+        <LineChart
+          ariaLabel={`${ind.label} ${periodLabel} 추이`}
+          dates={points.map((p) => p[0])}
+          series={[{ label: ind.label, values: points.map((p) => p[1]), color: "var(--accent)" }]}
+          unit={pct ? ind.unit : ""}
+          digits={(last ?? 0) >= 1000 ? 0 : 2}
+          height={260}
+          reference={CHART_REFERENCE[ind.id]}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -425,6 +509,8 @@ function ThisWeek() {
 
 export default function Dashboard() {
   const { data, error, loading, reload } = useApi<IndicatorsResponse>("/api/dashboard/indicators");
+  const [chartId, setChartId] = useState<string | null>(null);
+  const chartInd = data?.indicators.find((i) => i.id === chartId && !i.error);
 
   return (
     <>
@@ -457,11 +543,13 @@ export default function Dashboard() {
           : null}
         {data?.indicators.map((ind) => (
           <Fragment key={ind.id}>
-            <IndicatorCard ind={ind} />
+            <IndicatorCard ind={ind} open={chartId === ind.id} onToggle={() => setChartId((c) => (c === ind.id ? null : ind.id))} />
             {ind.id === "vix" ? <FearGreedCard fg={data.fear_greed} /> : null}
           </Fragment>
         ))}
       </section>
+
+      {chartInd ? <IndicatorChart key={chartInd.id} ind={chartInd} onClose={() => setChartId(null)} /> : null}
 
       <div className="grid dash-lower">
         <Sectors />
