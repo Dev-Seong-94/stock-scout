@@ -37,6 +37,7 @@ backend/   FastAPI (Python 3.11 venv in backend/.venv)
                       insiders (weekly Form 4 buys/sells), finra (margin debt)
   app/routers/        dashboard, screener, stocks, macro
   scripts/build_snapshot.py
+  scripts/panel_brief.py   one stock's data from the running API → data/panel/<SYM>-<date>.md
   tests/test_core.py  offline tests (pytest -q)
 frontend/  Next.js 16 App Router, React 19, plain CSS (app/globals.css tokens)
   app/page.tsx                 dashboard
@@ -137,6 +138,21 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
 - "적자 성장주 점검" metrics: cash_runway (months; None when not burning cash),
   share_change_1y (diluted shares YoY), gross_margin_change (%p YoY). They need
   a full snapshot rebuild to appear in the screener.
+
+## Perspective panel (`/panel <SYM> [question]`, added 2026-11-04)
+
+A Claude Code workflow for the owner's own research, not an app feature.
+`scripts/panel_brief.py` writes one Markdown brief from the running API
+(metrics vs sector and universe, own-past valuation, 1y price path, insiders,
+filings, news titles, macro backdrop, 30-day calendar). Five agents in
+`.claude/agents/` read the same brief: `panel-value` (30-year value PM),
+`panel-growth`, `panel-macro`, `panel-skeptic` (short-side researcher),
+`panel-technical` (trading desk). Shared rules and answer format live in
+`.claude/panel/rules.md`: no buy/sell/target-price language, every claim cites
+a brief number, inferences start with "추정:", at most 3 web searches. The
+command (`.claude/commands/panel.md`) runs them in parallel and summarises where
+they agree and where they split, without merging them into a verdict; the
+result is saved next to the brief in `backend/data/panel/` (gitignored).
 
 ## Conventions
 
