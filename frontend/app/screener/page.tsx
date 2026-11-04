@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { CriteriaSummary } from "@/components/MyCriteria";
@@ -21,6 +21,44 @@ import type { Catalog, Filters, Preset, Range, ScreenResult } from "@/lib/types"
 const DEFAULT_COLUMNS = ["market_cap", "pe", "roe", "revenue_growth", "rsi14", "ret_3m"];
 const STALE_DAYS = 3;
 
+// The screener's conditions live in the URL (replaced in place, no new history entry),
+// so going back from a stock page lands on the same preset, filters, sort and page.
+type UrlState = { filters: Filters; sectors: string[]; query: string; sort: string; desc: boolean; page: number; presetId: string | null };
+
+function readUrl(params: URLSearchParams): UrlState {
+  let filters: Filters = {};
+  try {
+    const raw = params.get("f");
+    if (raw) filters = JSON.parse(raw) as Filters;
+  } catch {
+    filters = {};
+  }
+  const sector = params.get("sector");
+  return {
+    filters,
+    sectors: sector ? sector.split(",").filter(Boolean) : [],
+    query: params.get("q") ?? "",
+    sort: params.get("sort") ?? "market_cap",
+    desc: params.get("asc") !== "1",
+    page: Math.max(0, Number(params.get("page")) || 0),
+    presetId: params.get("preset"),
+  };
+}
+
+function writeUrl(s: UrlState): string {
+  const p = new URLSearchParams();
+  const active = Object.fromEntries(Object.entries(s.filters).filter(([, r]) => isActive(r)));
+  if (Object.keys(active).length) p.set("f", JSON.stringify(active));
+  if (s.sectors.length) p.set("sector", s.sectors.join(","));
+  if (s.query) p.set("q", s.query);
+  if (s.sort !== "market_cap") p.set("sort", s.sort);
+  if (!s.desc) p.set("asc", "1");
+  if (s.page) p.set("page", String(s.page));
+  if (s.presetId) p.set("preset", s.presetId);
+  const qs = p.toString();
+  return qs ? `/screener?${qs}` : "/screener";
+}
+
 // Shown whenever a filter looks for stocks that fell a lot: the classic value trap.
 const FALLEN_CHECKLIST = [
   "많이 빠진 종목은 이유가 있는 경우가 많아요. 최근 실적 발표·가이던스(공시의 8-K)와 뉴스를 먼저 확인하세요.",
@@ -28,25 +66,27 @@ const FALLEN_CHECKLIST = [
 ];
 
 function Screener() {
-  const router = useRouter();
   const params = useSearchParams();
   const catalogReq = useApi<Catalog>("/api/screener/metrics");
   const catalog = catalogReq.data;
   const [profile] = useProfile();
 
-  const [filters, setFilters] = useState<Filters>({});
-  const [sectors, setSectors] = useState<string[]>(() => (params.get("sector") ? [params.get("sector") as string] : []));
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("market_cap");
-  const [desc, setDesc] = useState(true);
-  const [page, setPage] = useState(0);
+  const [initial] = useState(() => readUrl(new URLSearchParams(params.toString())));
+  const [filters, setFilters] = useState<Filters>(initial.filters);
+  const [sectors, setSectors] = useState<string[]>(initial.sectors);
+  const [query, setQuery] = useState(initial.query);
+  const [sort, setSort] = useState(initial.sort);
+  const [desc, setDesc] = useState(initial.desc);
+  const [page, setPage] = useState(initial.page);
   const [result, setResult] = useState<ScreenResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [skipStart, setSkipStart] = useState(false);
   const [showFilters, setShowFilters] = useState(false); // only matters on narrow screens
-  const [sectorMode, setSectorMode] = useState<Record<string, boolean>>({});
-  const [presetChecklist, setPresetChecklist] = useState<{ name: string; items: string[] } | null>(null);
+  const [sectorMode, setSectorMode] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(Object.keys(initial.filters).filter((k) => k.endsWith(SECTOR_SUFFIX)).map((k) => [baseKey(k), true])),
+  );
+  const [presetId, setPresetId] = useState<string | null>(initial.presetId);
   const [presetRun, setPresetRun] = useState(0); // remounts the filter panel so a preset's groups open
 
   const metricsByKey = useMemo(() => new Map((catalog?.metrics ?? []).map((m) => [m.key, m])), [catalog]);
@@ -58,6 +98,17 @@ function Screener() {
   // RSI capped low or price far below its high → looking at stocks that fell a lot.
   const lookingAtFallen =
     (filters.rsi14?.[1] ?? 100) <= 40 || (filters.from_52w_high?.[1] ?? 0) <= -20 || (filters.ret_3m?.[1] ?? 0) <= -15;
+
+  const presetChecklist = useMemo(() => {
+    const p = catalog?.presets.find((x) => x.id === presetId);
+    return p?.checklist?.length ? { name: p.name, items: p.checklist } : null;
+  }, [catalog, presetId]);
+
+  // Keep the URL in step with the conditions without adding history entries.
+  useEffect(() => {
+    const next = writeUrl({ filters, sectors, query, sort, desc, page, presetId });
+    if (next !== window.location.pathname + window.location.search) window.history.replaceState(window.history.state, "", next);
+  }, [filters, sectors, query, sort, desc, page, presetId]);
 
   // Search whenever conditions change (debounced while typing).
   useEffect(() => {
@@ -103,7 +154,7 @@ function Screener() {
     setFilters(p.filters);
     setSectors(p.sectors ?? []);
     setSectorMode(Object.fromEntries(Object.keys(p.filters).filter((k) => k.endsWith(SECTOR_SUFFIX)).map((k) => [baseKey(k), true])));
-    setPresetChecklist(p.checklist?.length ? { name: p.name, items: p.checklist } : null);
+    setPresetId(catalog?.presets.some((x) => x.id === p.id) ? p.id : null);
     setPresetRun((n) => n + 1);
   };
 
@@ -115,11 +166,10 @@ function Screener() {
   const reset = () => {
     setFilters({});
     setSectorMode({});
-    setPresetChecklist(null);
+    setPresetId(null);
     setSectors([]);
     setQuery("");
     setPage(0);
-    router.replace("/screener");
   };
 
   const sortBy = (key: string) => {
