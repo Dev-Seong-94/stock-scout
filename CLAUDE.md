@@ -111,6 +111,12 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
   `/api/screener/search` returns it in `skipped` and the UI says to rebuild.
 - Yahoo returns `profitMargins = 0` for deeply negative margins; snapshot
   recomputes net margin from netIncomeToCommon / totalRevenue.
+- FCF (2026-11-04): Yahoo's `info["freeCashflow"]` is a levered estimate that
+  can be far off (NVDA $42B vs $127B reported). FCF yield and cash runway use
+  the TTM cash flow statement (`ttm_cashflow`: Free Cash Flow, else operating
+  cash flow + capex) and fall back to Yahoo's number only without statements
+  (`--fast`). Financial Services gets no FCF yield or runway (bank cash flow
+  mixes in loans and deposits). The full build makes one more request per ticker.
 - Share classes of one company (GOOG/GOOGL, FOX/FOXA, NWS/NWSA, UA/UAA,
   CENT/CENTA; matched by name): the most traded is the primary row
   (`other_classes`), the rest get `share_class_of` and are left out of results,

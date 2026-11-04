@@ -11,7 +11,7 @@ from app.metrics import METRICS, METRIC_KEYS, PRESETS, SECTOR_SUFFIX
 from app.regime import read_regime
 from app import filing_summary, screener
 from app.screener import apply_filters, with_sector_percentiles
-from app.snapshot import build_row, cash_runway_months, financial_extras, fundamentals_from_info
+from app.snapshot import build_row, cash_runway_months, fcf_from_statement, financial_extras, fundamentals_from_info
 from app.valuation import valuation_ranges
 
 
@@ -163,6 +163,28 @@ def test_cash_runway():
     assert cash_runway_months(1200.0, None, -1200.0) == pytest.approx(12.0)
     assert cash_runway_months(1200.0, 100.0, 50.0) is None  # not burning cash
     assert cash_runway_months(None, -100.0, None) is None
+
+
+def test_fcf_yield_prefers_cash_flow_statement():
+    col = pd.to_datetime(["2026-07-31"])
+    stmt = pd.DataFrame([[127e9], [134e9], [-7e9]], index=["Free Cash Flow", "Operating Cash Flow", "Capital Expenditure"], columns=col)
+    assert fcf_from_statement(stmt) == pytest.approx(127e9)
+    # No FCF line: operating cash flow plus (negative) capex.
+    assert fcf_from_statement(stmt.drop("Free Cash Flow")) == pytest.approx(127e9)
+    assert fcf_from_statement(pd.DataFrame()) is None
+
+    info = {"currentPrice": 200.0, "marketCap": 5e12, "freeCashflow": 42e9, "sector": "Technology"}
+    assert fundamentals_from_info(info, fcf=127e9)["fcf_yield"] == pytest.approx(2.54)
+    assert fundamentals_from_info(info)["fcf_yield"] == pytest.approx(0.84)  # fallback: Yahoo's estimate
+    row = build_row("ACME", pd.DataFrame(), info, None, stmt)
+    assert row["fcf_yield"] == pytest.approx(2.54)
+
+
+def test_no_fcf_for_banks():
+    info = {"currentPrice": 300.0, "marketCap": 8e11, "sector": "Financial Services",
+            "totalCash": 1e11, "operatingCashflow": -1.4e11}
+    out = fundamentals_from_info(info, fcf=-1.48e11)
+    assert out["fcf_yield"] is None and out["cash_runway"] is None
 
 
 def test_share_and_gross_margin_change():

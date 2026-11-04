@@ -184,3 +184,13 @@ def annual_income(symbol: str) -> pd.DataFrame:
         return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
     except Exception:
         return pd.DataFrame()
+
+
+@ttl_cache(seconds=6 * 60 * 60)
+def ttm_cashflow(symbol: str) -> pd.DataFrame:
+    """Trailing-twelve-month cash flow statement (one column)."""
+    try:
+        df = yf.Ticker(symbol).ttm_cashflow
+        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()

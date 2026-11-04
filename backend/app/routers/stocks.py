@@ -35,7 +35,7 @@ def detail(symbol: str) -> dict:
         raise HTTPException(404, f"{symbol} 데이터를 찾지 못했어요.")
 
     # Fresh numbers for this one ticker (the snapshot may be a day old).
-    metrics = build_row(symbol, hist, info, market.annual_income(symbol))
+    metrics = build_row(symbol, hist, info, market.annual_income(symbol), market.ttm_cashflow(symbol))
 
     # Sector medians from the snapshot, for context on each card.
     peers = screener.sector_peers(metrics.get("sector"))

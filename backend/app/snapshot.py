@@ -35,11 +35,41 @@ def _pct(value) -> float | None:
     return None if v is None else v * 100
 
 
-def fundamentals_from_info(info: dict) -> dict:
-    """Map Yahoo's quoteSummary fields to our metric keys and units."""
+# Banks' and insurers' operating cash flow includes lending and deposits, so
+# "free cash flow" says nothing about them; FCF yield and runway are left empty.
+NO_FCF_SECTORS = {"Financial Services"}
+
+
+def fcf_from_statement(cashflow: pd.DataFrame | None) -> float | None:
+    """Free cash flow (operating cash flow − capex) from the TTM cash flow statement.
+
+    Yahoo's info["freeCashflow"] is a levered estimate that can be far off
+    (NVDA: $42B vs $127B reported), so the statement comes first."""
+    if cashflow is None or cashflow.empty:
+        return None
+    cashflow = cashflow.reindex(sorted(cashflow.columns, reverse=True), axis=1)  # newest first
+    fcf = _row(cashflow, "Free Cash Flow")
+    if fcf is not None and len(fcf):
+        return _clean(float(fcf.iloc[0]))
+    ocf = _row(cashflow, "Operating Cash Flow", "Cash Flow From Continuing Operating Activities")
+    capex = _row(cashflow, "Capital Expenditure")
+    if ocf is not None and len(ocf):
+        return _clean(float(ocf.iloc[0]) + (float(capex.iloc[0]) if capex is not None and len(capex) else 0.0))
+    return None
+
+
+def fundamentals_from_info(info: dict, fcf: float | None = None) -> dict:
+    """Map Yahoo's quoteSummary fields to our metric keys and units.
+
+    `fcf` is the statement-based free cash flow; without it (fast builds, missing
+    statements) Yahoo's own estimate is used."""
     price = _clean(info.get("currentPrice") or info.get("regularMarketPrice"))
     market_cap = _clean(info.get("marketCap"))
-    fcf = _clean(info.get("freeCashflow"))
+    if fcf is None:
+        fcf = _clean(info.get("freeCashflow"))
+    operating_cf = _clean(info.get("operatingCashflow"))
+    if info.get("sector") in NO_FCF_SECTORS:
+        fcf = operating_cf = None
     dividend_rate = _clean(info.get("dividendRate"))
     avg_volume = _clean(info.get("averageVolume"))
     debt_to_equity = _clean(info.get("debtToEquity"))
@@ -78,7 +108,7 @@ def fundamentals_from_info(info: dict) -> dict:
         "insider_pct": _pct(info.get("heldPercentInsiders")),
         "institution_pct": _pct(info.get("heldPercentInstitutions")),
         "cash_runway": cash_runway_months(
-            _clean(info.get("totalCash")), fcf, _clean(info.get("operatingCashflow"))
+            _clean(info.get("totalCash")), fcf, operating_cf
         ),
     }
 
@@ -128,9 +158,15 @@ def financial_extras(income: pd.DataFrame) -> dict:
     return out
 
 
-def build_row(symbol: str, history: pd.DataFrame, info: dict, income: pd.DataFrame | None) -> dict:
+def build_row(
+    symbol: str,
+    history: pd.DataFrame,
+    info: dict,
+    income: pd.DataFrame | None,
+    cashflow: pd.DataFrame | None = None,
+) -> dict:
     row = {"symbol": symbol}
-    row |= fundamentals_from_info(info)
+    row |= fundamentals_from_info(info, fcf_from_statement(cashflow))
     row |= price_indicators(history) if history is not None and not history.empty else {}
     row |= financial_extras(income if income is not None else pd.DataFrame())
     if row.get("price") is None and history is not None and not history.empty:
@@ -254,6 +290,7 @@ def build_snapshot(
         t = yf.Ticker(sym)
         info = _with_retry(lambda s=t: s.info or {}) or {}
         income = _with_retry(lambda s=t: s.income_stmt) if include_statements else None
+        cashflow = _with_retry(lambda s=t: s.ttm_cashflow) if include_statements else None
         hist = histories.get(sym)
         if hist is None:
             hist = _with_retry(lambda s=t: _single_history(s))
@@ -263,7 +300,7 @@ def build_snapshot(
         if not info and hist.empty:
             failed.append(sym)
         else:
-            rows.append(build_row(sym, hist, info, income))
+            rows.append(build_row(sym, hist, info, income, cashflow))
         del t
         if progress:
             progress(len(done) + n, len(symbols), sym)
