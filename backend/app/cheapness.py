@@ -63,6 +63,16 @@ def _condition(key: str, label: str, met: bool | None, reason: str | None = None
     return {"key": key, "label": label, "status": status, "reason": reason, **values}
 
 
+def _other_currency(row: Mapping) -> str | None:
+    """The statements' currency when it differs from the share price's, e.g. CNY for PDD."""
+    currency = row.get("statement_currency")
+    return currency if isinstance(currency, str) and currency else None
+
+
+def _currency_reason(row: Mapping) -> str:
+    return f"재무제표가 {_other_currency(row)} 기준이라 달러 주가와 바로 비교할 수 없어요."
+
+
 def _sector_condition(row: Mapping) -> dict:
     pe, percentile = _clean(row.get("pe")), _clean(row.get("pe@sector"))
     facts = {"pe": pe, "percentile": percentile}
@@ -85,6 +95,8 @@ def _own_past_condition(row: Mapping) -> dict:
     reason = None
     if "pe_own_median" not in row:
         reason = REBUILD_REASON
+    elif _other_currency(row):
+        reason = _currency_reason(row)
     elif median is None:
         reason = "비교할 만한 과거 PER이 없어요. 상장한 지 얼마 안 됐거나 대부분 적자였을 수 있어요."
     elif current is None:
@@ -96,11 +108,13 @@ def _own_past_condition(row: Mapping) -> dict:
 
 def _cash_condition(row: Mapping) -> dict:
     price, fcf_yield = _clean(row.get("price")), _clean(row.get("fcf_yield"))
-    values = None if row.get("sector") in NO_FCF_SECTORS else cash_values(price, fcf_yield)
+    values = None if row.get("sector") in NO_FCF_SECTORS or _other_currency(row) else cash_values(price, fcf_yield)
     facts = {"price": price, "fcf_yield": fcf_yield, "values": values}
     reason = None
     if row.get("sector") in NO_FCF_SECTORS:
         reason = "금융사는 영업현금흐름에 대출·예금 흐름이 섞여 있어서 계산하지 않아요."
+    elif _other_currency(row):
+        reason = _currency_reason(row)
     elif fcf_yield is None:
         reason = "잉여현금흐름(FCF) 데이터가 없어요."
     elif fcf_yield <= 0:

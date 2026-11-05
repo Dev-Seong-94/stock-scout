@@ -25,10 +25,12 @@ Seong (Korean, lives in Japan, frontend lead by day). Talk to him in Korean.
 
 ```
 backend/   FastAPI (Python 3.11 venv in backend/.venv)
-  app/metrics.py      38 metrics + Korean text, sectors, example presets (+ checklists)
+  app/metrics.py      40 metrics + Korean text, sectors, example presets (+ checklists)
   app/indicators.py   RSI, SMA distance, returns, volatility, CAGR, performance_since (pure, tested)
   app/filing_summary.py  Form 4 / 144 / 8-K → Korean one-liners (pure, tested)
   app/valuation.py    a stock's PER/PSR vs its own past (annual statements, pure, tested)
+  app/cheapness.py    the three "싼가?" conditions and cash value (pure, tested)
+  app/decline.py      "왜 떨어졌나?" return comparison and quarterly trend (pure, tested)
   app/snapshot.py     daily batch → data/snapshot.parquet (+ snapshot_meta.json)
   app/screener.py     filters the snapshot in memory; adds "<metric>@sector" percentile columns
   app/universe.py     which tickers the snapshot covers
@@ -127,6 +129,23 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
 - Stock page layout (2026-11-05): sticky jump links; only "먼저 볼 지표" is
   open by default (`focusMetrics` from "내 기준", else `DEFAULT_FOCUS`), and
   "전체 지표 보기" opens all metrics and is remembered in localStorage.
+- "싸 보이는 후보 찾기" (2026-11-05, spec: `docs/specs/value-evidence.md`): three
+  conditions in `app/cheapness.py`, used by both the screener and the stock
+  page's "싼가?": PER in the sector's lowest 40%, last fiscal year's PER below
+  its own median, price below a cash value (same assumptions for every company:
+  FCF grows 0/5/10% for 10 years, 10% discount, 2.5% after; base = 5%). The
+  count is an order to check candidates in, never a score; the start button
+  sorts and doesn't filter; the cash value always shows its assumptions and "not
+  a target price". All three use snapshot values, so they can differ from the
+  stock page's live cards. Conditions that can't be checked say why.
+- "왜 떨어졌나?" (`app/decline.py`): stock vs sector ETF vs S&P 500 over four
+  windows plus the latest quarter vs a year earlier. Fixed sentences compare
+  and flag clear worsening; they never name a cause.
+- Statements in another currency than the share price (PDD in CNY,
+  ASML and CCEP in EUR): `statement_currency` is set and FCF yield and own-past PER stay
+  empty, since dividing CNY cash flow by a USD market cap gives nonsense. Other
+  statement-based numbers for these stocks (revenue shown with "$") are unconverted.
+- Snapshot prices are 5 years (own-past PER); price metrics use the last 2.
 - Filings tab summaries (`backend/app/filing_summary.py`, pure, tested):
   Form 4 and 144 are parsed from their raw XML (the `xsl…/` path prefix is
   the HTML rendering), 8-K from EDGAR's item numbers. 10-K/10-Q get a "what to

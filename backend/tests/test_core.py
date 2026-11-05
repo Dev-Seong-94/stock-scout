@@ -614,3 +614,21 @@ def test_quarterly_trend_handles_gaps_and_good_results():
     assert decline.earnings_facts({"revenue_change": -0.4}) == []  # not "fell 0%"
     assert decline.quarterly_trend(pd.DataFrame()) is None
     assert decline.earnings_facts(None) == []
+
+
+def test_statements_in_another_currency_are_not_divided_by_a_dollar_price():
+    # PDD: price in USD, statements in CNY. 660B CNY over a 117B USD market cap isn't a 560% yield.
+    info = {"currency": "USD", "financialCurrency": "CNY", "marketCap": 117e9, "currentPrice": 80.0, "freeCashflow": 660e9}
+    cashflow = pd.DataFrame({pd.Timestamp("2026-06-30"): [660e9]}, index=["Free Cash Flow"])
+    five, _ = _two_lengths()
+    row = build_row("PDD", five, info, _annual_income(), cashflow)
+    assert row["statement_currency"] == "CNY"
+    assert row["fcf_yield"] is None and row["cash_value_gap"] is None
+    assert row["pe_own_median"] is None and row["pe_vs_own"] is None
+    conditions = _by_key(row | {"pe": 9.0, "pe@sector": 10.0})
+    assert conditions["sector"]["status"] == "met"  # Yahoo's PER is already in one currency
+    assert conditions["own_past"]["status"] == "na" and "CNY" in conditions["own_past"]["reason"]
+    assert conditions["cash"]["status"] == "na" and "CNY" in conditions["cash"]["reason"]
+
+    same = build_row("AAA", five, info | {"financialCurrency": "USD", "freeCashflow": 5e9}, _annual_income())
+    assert same["statement_currency"] is None and same["fcf_yield"] == pytest.approx(5e9 / 117e9 * 100)

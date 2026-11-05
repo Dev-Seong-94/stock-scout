@@ -59,6 +59,12 @@ def fcf_from_statement(cashflow: pd.DataFrame | None) -> float | None:
     return None
 
 
+def statement_currency(info: dict) -> str | None:
+    """The currency of the financial statements when it isn't the share price's."""
+    currency, reported = info.get("currency"), info.get("financialCurrency")
+    return reported if currency and reported and reported != currency else None
+
+
 def fundamentals_from_info(info: dict, fcf: float | None = None) -> dict:
     """Map Yahoo's quoteSummary fields to our metric keys and units.
 
@@ -71,6 +77,8 @@ def fundamentals_from_info(info: dict, fcf: float | None = None) -> dict:
     operating_cf = _clean(info.get("operatingCashflow"))
     if info.get("sector") in NO_FCF_SECTORS:
         fcf = operating_cf = None
+    # A dollar market cap can't be compared with cash flow reported in, say, CNY.
+    other_currency = statement_currency(info)
     dividend_rate = _clean(info.get("dividendRate"))
     avg_volume = _clean(info.get("averageVolume"))
     debt_to_equity = _clean(info.get("debtToEquity"))
@@ -90,7 +98,8 @@ def fundamentals_from_info(info: dict, fcf: float | None = None) -> dict:
         "pb": _clean(info.get("priceToBook")),
         "ps": _clean(info.get("priceToSalesTrailing12Months")),
         "ev_ebitda": _clean(info.get("enterpriseToEbitda")),
-        "fcf_yield": (fcf / market_cap * 100) if fcf is not None and market_cap else None,
+        "fcf_yield": None if other_currency else (fcf / market_cap * 100) if fcf is not None and market_cap else None,
+        "statement_currency": other_currency,
         "dividend_yield": (dividend_rate / price * 100) if dividend_rate and price else 0.0 if price else None,
         "roe": _pct(info.get("returnOnEquity")),
         "roa": _pct(info.get("returnOnAssets")),
@@ -188,7 +197,8 @@ def build_row(
     row |= fundamentals_from_info(info, fcf_from_statement(cashflow))
     row |= price_indicators(recent_prices(history)) if history is not None and not history.empty else {}
     row |= financial_extras(income if income is not None else pd.DataFrame())
-    row |= own_past_pe(history, income)
+    # EPS in another currency would make the PER meaningless.
+    row |= own_past_pe(history, None if row["statement_currency"] else income)
     row["pe_vs_own"] = pe_vs_own(row["pe_own_current"], row["pe_own_median"])
     row["cash_value_gap"] = cash_value_gap(row.get("fcf_yield"))
     if row.get("price") is None and history is not None and not history.empty:
