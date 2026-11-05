@@ -63,7 +63,10 @@ export function presetFit(id: string, p: Profile): Fit | null {
   return { score: (goal ? 2 : 0) - warnings.length, goal, warnings };
 }
 
-/** Metrics worth looking at first for these answers (shown on top in the screener and compare view). */
+/** Shown first on the stock page until "내 기준" is answered: one from each kind of question. */
+export const DEFAULT_FOCUS = ["pe", "ps", "operating_margin", "revenue_growth", "debt_to_equity", "from_52w_high"];
+
+/** Metrics worth looking at first for these answers (shown on top in the screener, compare view and stock page). */
 export function focusMetrics(p: Profile): string[] {
   const byGoal: Record<Goal, string[]> = {
     income: ["dividend_yield", "fcf_yield", "debt_to_equity", "interest_coverage"],

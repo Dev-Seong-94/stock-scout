@@ -13,6 +13,7 @@ const KEYS = {
   upColor: "stockscout.upColor",
   profile: "stockscout.profile.v1",
   compare: "stockscout.compare.v1",
+  showAllMetrics: "stockscout.showAllMetrics.v1",
 };
 
 function read<T>(key: string, fallback: T): T {
@@ -108,6 +109,11 @@ export function useUpColor() {
 
 export function useProfile() {
   return useStored<Profile | null>(KEYS.profile, null);
+}
+
+/** Whether the stock page lists every metric or only the ones to look at first. */
+export function useShowAllMetrics() {
+  return useStored<boolean>(KEYS.showAllMetrics, false);
 }
 
 export const COMPARE_MAX = 5;

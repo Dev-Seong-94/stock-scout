@@ -124,6 +124,9 @@ Verified 2026-10-29: `pytest -q` (13 passed), `npm run typecheck` and
 - Stock page "한눈에 보기" (`frontend/lib/notables.ts`) is fixed rules stating
   facts (losses, runway, dilution, sector extremes, price position), never a
   verdict, and ends by pointing to the 10-Q/8-K.
+- Stock page layout (2026-11-05): sticky jump links; only "먼저 볼 지표" is
+  open by default (`focusMetrics` from "내 기준", else `DEFAULT_FOCUS`), and
+  "전체 지표 보기" opens all metrics and is remembered in localStorage.
 - Filings tab summaries (`backend/app/filing_summary.py`, pure, tested):
   Form 4 and 144 are parsed from their raw XML (the `xsl…/` path prefix is
   the HTML rendering), 8-K from EDGAR's item numbers. 10-K/10-Q get a "what to

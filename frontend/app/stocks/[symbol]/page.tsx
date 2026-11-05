@@ -8,10 +8,11 @@ import CandleChart from "@/components/CandleChart";
 import LineChart from "@/components/LineChart";
 import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
+import { answerLabel, DEFAULT_FOCUS, focusMetrics } from "@/lib/criteria";
 import { metricCell, metricValue, num, price, relativeTime, sectorRank } from "@/lib/format";
 import { notables } from "@/lib/notables";
-import { COMPARE_MAX, useCompare, useLastScreenerUrl, useWatchlist } from "@/lib/storage";
-import type { Article, Catalog, Filing, Ownership, PriceHistory, StockDetail, Valuation, ValuationRange } from "@/lib/types";
+import { COMPARE_MAX, useCompare, useLastScreenerUrl, useProfile, useShowAllMetrics, useWatchlist } from "@/lib/storage";
+import type { Article, Catalog, Filing, Metric, Ownership, PriceHistory, StockDetail, Valuation, ValuationRange } from "@/lib/types";
 
 type RangeKey = "1m" | "3m" | "6m" | "1y" | "3y" | "5y";
 type ChartKind = "candle" | "line";
@@ -26,7 +27,7 @@ function PriceChart({ symbol }: { symbol: string }) {
   const change = first && last ? (last / first - 1) * 100 : null;
 
   return (
-    <section className="panel" aria-labelledby="chart-title">
+    <section className="panel" id="stock-chart" aria-labelledby="chart-title">
       <div className="panel__head">
         <h2 id="chart-title">
           주가 <Change value={change} digits={1} className="small" />
@@ -124,10 +125,33 @@ function balancedColumns(width: number, groupSizes: number[]): number {
   return best;
 }
 
+function MetricCard({ metric: m, detail }: { metric: Metric; detail: StockDetail }) {
+  const v = detail.metrics[m.key];
+  const med = detail.sector_median[m.key];
+  const rank = detail.sector_percentile?.[m.key];
+  return (
+    <div className="metric-card">
+      <div className="metric-card__label">
+        <span>{m.label}</span>
+        <InfoTip metric={m} />
+      </div>
+      <p className="metric-card__value" title={m.positive_only && v != null && v <= 0 ? "적자 또는 자본잠식이라 이 배수는 의미가 없어요" : undefined}>
+        {metricCell(v, m)}
+      </p>
+      {med !== undefined ? <p className="metric-card__median">섹터 {metricValue(med, m.unit)}</p> : null}
+      {rank !== undefined ? <p className="metric-card__rank">{sectorRank(rank)}</p> : null}
+    </div>
+  );
+}
+
 function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalog }) {
   const box = useRef<HTMLElement>(null);
   const [cols, setCols] = useState<number | null>(null);
-  const groupSizes = catalog.groups.map((g) => catalog.metrics.filter((m) => m.group === g.key).length);
+  const [profile] = useProfile();
+  const [showAll, setShowAll] = useShowAllMetrics();
+  const focusKeys = profile ? focusMetrics(profile) : DEFAULT_FOCUS;
+  const focus = focusKeys.flatMap((key) => catalog.metrics.find((m) => m.key === key) ?? []);
+  const groupSizes = [focus.length, ...catalog.groups.map((g) => catalog.metrics.filter((m) => m.group === g.key).length)];
   const sizesKey = groupSizes.join();
   useLayoutEffect(() => {
     const el = box.current;
@@ -142,7 +166,7 @@ function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalo
   const built = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
   const snapshotDate = built ? `${built.getMonth() + 1}/${built.getDate()}` : null;
   return (
-    <section ref={box} aria-labelledby="metrics-title" style={cols ? ({ "--metric-cols": cols } as React.CSSProperties) : undefined}>
+    <section ref={box} id="stock-metrics" aria-labelledby="metrics-title" style={cols ? ({ "--metric-cols": cols } as React.CSSProperties) : undefined}>
       <div className="section-head">
         <h2 id="metrics-title">지표</h2>
         {detail.peer_count ? (
@@ -153,33 +177,40 @@ function MetricCards({ detail, catalog }: { detail: StockDetail; catalog: Catalo
           </p>
         ) : null}
       </div>
-      {catalog.groups.map((g) => (
-        <div key={g.key} className="metric-group">
-          <h3>{g.label}</h3>
-          <div className="metric-cards">
-            {catalog.metrics
-              .filter((m) => m.group === g.key)
-              .map((m) => {
-                const v = detail.metrics[m.key];
-                const med = detail.sector_median[m.key];
-                const rank = detail.sector_percentile?.[m.key];
-                return (
-                  <div key={m.key} className="metric-card">
-                    <div className="metric-card__label">
-                      <span>{m.label}</span>
-                      <InfoTip metric={m} />
-                    </div>
-                    <p className="metric-card__value" title={m.positive_only && v != null && v <= 0 ? "적자 또는 자본잠식이라 이 배수는 의미가 없어요" : undefined}>
-                      {metricCell(v, m)}
-                    </p>
-                    {med !== undefined ? <p className="metric-card__median">섹터 {metricValue(med, m.unit)}</p> : null}
-                    {rank !== undefined ? <p className="metric-card__rank">{sectorRank(rank)}</p> : null}
-                  </div>
-                );
-              })}
-          </div>
+      <div className="metric-group">
+        <div className="metric-focus__head">
+          <h3>먼저 볼 지표</h3>
+          {profile ? (
+            <span className="small muted">내 기준: {answerLabel(profile)}</span>
+          ) : (
+            <Link className="small muted" href="/screener">
+              내 기준을 정하면 이 목록이 바뀌어요
+            </Link>
+          )}
         </div>
-      ))}
+        <div className="metric-cards">
+          {focus.map((m) => (
+            <MetricCard key={m.key} metric={m} detail={detail} />
+          ))}
+        </div>
+      </div>
+      <button type="button" className="btn" aria-expanded={showAll} aria-controls="all-metrics" onClick={() => setShowAll(!showAll)}>
+        {showAll ? "전체 지표 접기" : `전체 지표 보기 (${catalog.metrics.length}개)`}
+      </button>
+      <div id="all-metrics" className="metric-all" hidden={!showAll}>
+        {catalog.groups.map((g) => (
+          <div key={g.key} className="metric-group">
+            <h3>{g.label}</h3>
+            <div className="metric-cards">
+              {catalog.metrics
+                .filter((m) => m.group === g.key)
+                .map((m) => (
+                  <MetricCard key={m.key} metric={m} detail={detail} />
+                ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -194,8 +225,8 @@ function usd(v: number | null | undefined) {
 
 /** The company's own description, cut to its first sentences. */
 function firstSentences(text: string, count: number) {
-  const parts = text.match(/[^.!?]+(?:[.!?](?=\s+[A-Z]|$))+/g) ?? [text];
-  return parts.slice(0, count).join("").trim();
+  // A full stop only ends a sentence before a capital, so "IonQ, Inc. develops" stays whole.
+  return text.split(/(?<=[.!?])\s+(?=[A-Z])/).slice(0, count).join(" ").trim();
 }
 
 function CompanyProfile({ detail }: { detail: StockDetail }) {
@@ -258,7 +289,7 @@ function CompanyProfile({ detail }: { detail: StockDetail }) {
 function AtAGlance({ detail, catalog, onReadFilings }: { detail: StockDetail; catalog: Catalog; onReadFilings: () => void }) {
   const items = notables(detail, catalog.metrics);
   return (
-    <section className="panel glance" aria-labelledby="glance-title">
+    <section className="panel glance" id="stock-glance" aria-labelledby="glance-title">
       <div className="panel__head">
         <h2 id="glance-title">한눈에 보기</h2>
         <span className="small muted">정해진 규칙으로 뽑은 사실이에요. 좋고 나쁨의 판단은 아니에요.</span>
@@ -329,7 +360,7 @@ function OwnValuation({ label, unit, range }: { label: string; unit: string; ran
 function ValuationHistory({ symbol }: { symbol: string }) {
   const { data, error, loading, reload } = useApi<Valuation>(`/api/stocks/${symbol}/valuation`);
   return (
-    <section className="panel" aria-labelledby="own-valuation-title">
+    <section className="panel" id="stock-valuation" aria-labelledby="own-valuation-title">
       <div className="panel__head">
         <h2 id="own-valuation-title">자기 과거와 비교한 밸류에이션</h2>
       </div>
@@ -625,6 +656,22 @@ export default function StockPage() {
       </div>
 
       {detail.error ? <ErrorNote message={detail.error} onRetry={detail.reload} /> : null}
+
+      <nav className="jump-nav" aria-label="이 페이지 안에서 이동">
+        <a href="#stock-glance">한눈에 보기</a>
+        <a href="#stock-chart">주가</a>
+        <a href="#stock-valuation">밸류에이션</a>
+        <a href="#stock-metrics">지표</a>
+        <a href="#details-tabs" onClick={() => setTab("flow")}>
+          수급
+        </a>
+        <a href="#details-tabs" onClick={() => setTab("news")}>
+          뉴스
+        </a>
+        <a href="#details-tabs" onClick={() => setTab("filings")}>
+          공시
+        </a>
+      </nav>
 
       <div className="grid stock-grid">
         {d ? <CompanyProfile detail={d} /> : null}
