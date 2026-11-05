@@ -7,7 +7,7 @@ import { CriteriaSummary } from "@/components/MyCriteria";
 import { CompareBar } from "@/components/screener/CompareBar";
 import { baseKey, describeRange, isActive, plainRange, toCsv } from "@/components/screener/conditions";
 import { FilterPanel } from "@/components/screener/FilterPanel";
-import { PAGE_SIZE, ResultsTable } from "@/components/screener/ResultsTable";
+import { CHEAP_SORT, PAGE_SIZE, ResultsTable } from "@/components/screener/ResultsTable";
 import { SnapshotMissing } from "@/components/screener/SnapshotMissing";
 import { StartHere } from "@/components/screener/StartHere";
 import { ErrorNote, SetupHelp, Skeleton } from "@/components/ui";
@@ -171,6 +171,18 @@ function Screener() {
     setSectors([]);
     setQuery("");
     setPage(0);
+    if (sort === CHEAP_SORT) setSort("market_cap");
+  };
+
+  const findCheap = () => {
+    setFilters({});
+    setSectorMode({});
+    setPresetId(null);
+    setSectors([]);
+    setQuery("");
+    setPage(0);
+    setSort(CHEAP_SORT);
+    setDesc(true);
   };
 
   const sortBy = (key: string) => {
@@ -198,7 +210,7 @@ function Screener() {
   const sectorLabel = new Map(catalog.sectors.map((s) => [s.key, s.label]));
   const builtAt = catalog.snapshot ? new Date(catalog.snapshot.built_at) : null;
   const staleDays = builtAt ? Math.floor((Date.now() - builtAt.getTime()) / 86400000) : 0;
-  const showStart = !skipStart && !activeKeys.length && !sectors.length && !query && !!catalog.snapshot;
+  const showStart = !skipStart && sort !== CHEAP_SORT && !activeKeys.length && !sectors.length && !query && !!catalog.snapshot;
   const skipped = (result?.skipped ?? []).map((k) => metricsByKey.get(baseKey(k))?.label ?? k);
   const checklist = presetChecklist?.items ?? (lookingAtFallen ? FALLEN_CHECKLIST : []);
 
@@ -302,6 +314,7 @@ function Screener() {
               presets={catalog.presets}
               profile={profile}
               onPick={applyPreset}
+              onFindCheap={findCheap}
               onSkip={() => {
                 setSkipStart(true);
                 setShowFilters(true);
@@ -310,6 +323,19 @@ function Screener() {
           ) : null}
 
           {!showStart && profile ? <CriteriaSummary /> : null}
+
+          {sort === CHEAP_SORT ? (
+            <div className="note small">
+              <p>
+                <b>개수는 점수가 아니라 먼저 확인해 볼 순서예요.</b> 싼 데는 이유가 있을 수 있으니, 종목을 눌러 "싼가?"와 하락 이유를 확인해 보세요.
+              </p>
+              {result?.cheap_counts ? (
+                <p>
+                  3개 모두 충족 <b>{(result.cheap_counts["3"] ?? 0).toLocaleString()}</b>개 · 2개 충족 <b>{(result.cheap_counts["2"] ?? 0).toLocaleString()}</b>개
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           {skipped.length ? (
             <div className="note small">

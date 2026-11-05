@@ -11,11 +11,13 @@ export function StartHere({
   presets,
   profile,
   onPick,
+  onFindCheap,
   onSkip,
 }: {
   presets: Preset[];
   profile: Profile | null;
   onPick: (p: Preset) => void;
+  onFindCheap: () => void;
   onSkip: () => void;
 }) {
   // Names only by default so the results table stays near the top; the notes
@@ -37,6 +39,12 @@ export function StartHere({
         <button type="button" className="btn btn--ghost small" onClick={onSkip}>
           직접 고를게요
         </button>
+      </div>
+      <div className="start-cheap">
+        <button type="button" className="btn btn--primary" onClick={onFindCheap}>
+          가치보다 싸 보이는 후보 찾기
+        </button>
+        <p className="small muted">업종 대비, 자기 과거 대비, 현금 기준으로 비교해서 조건을 많이 충족한 종목부터 보여 줘요. 뭘 골라야 할지 모르겠다면 여기서 시작해 보세요.</p>
       </div>
       {profile ? <CriteriaSummary /> : <CriteriaForm />}
       {profile?.horizon === "short" ? <p className="note small">{SHORT_HORIZON_NOTE}</p> : null}

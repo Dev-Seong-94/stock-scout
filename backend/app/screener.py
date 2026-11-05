@@ -7,6 +7,7 @@ import threading
 
 import pandas as pd
 
+from app.cheapness import evaluate
 from app.metrics import METRIC_KEYS, METRICS, SECTOR_SUFFIX
 from app.snapshot import SNAPSHOT
 
@@ -14,7 +15,8 @@ _lock = threading.Lock()
 _frame: pd.DataFrame | None = None
 _loaded_mtime = 0.0  # snapshot file version currently in memory
 
-BASE_COLUMNS = ["symbol", "name", "sector", "industry", "price", "other_classes"]
+BASE_COLUMNS = ["symbol", "name", "sector", "industry", "price", "other_classes", "cheap_met", "cheap_checkable"]
+CHEAP_SORT = "cheap_met"
 POSITIVE_ONLY = {m.key for m in METRICS if m.positive_only}
 MIN_PEERS = 5  # fewer valid values than this in a sector → no percentile
 
@@ -68,6 +70,12 @@ def primary(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["share_class_of"].isna()] if "share_class_of" in df.columns else df
 
 
+def with_cheapness(df: pd.DataFrame) -> pd.DataFrame:
+    """Add how many "is it cheap?" conditions each row meets and could be checked."""
+    results = [evaluate(row) for row in df.to_dict(orient="records")]
+    return df.assign(cheap_met=[r["met"] for r in results], cheap_checkable=[r["checkable"] for r in results])
+
+
 def set_frame(df: pd.DataFrame | None) -> None:
     global _frame
     if df is not None:
@@ -78,7 +86,7 @@ def set_frame(df: pd.DataFrame | None) -> None:
         by_symbol = main.set_index("symbol")[pct_cols]
         rest = df[df["share_class_of"].notna()]
         rest = pd.concat([rest, by_symbol.reindex(rest["share_class_of"]).set_axis(rest.index)], axis=1)
-        df = pd.concat([main, rest]).sort_index()
+        df = with_cheapness(pd.concat([main, rest]).sort_index())
     with _lock:
         _frame = df
 
@@ -171,11 +179,20 @@ def run(
     # Metrics added after the snapshot was built have no column yet; say so
     # instead of silently ignoring the condition.
     skipped = [k for k, b in (ranges or {}).items() if k not in df.columns and k.removesuffix(SECTOR_SUFFIX) in METRIC_KEYS and b and any(v is not None for v in b)]
-    if sort in result.columns:
+    if sort == CHEAP_SORT and CHEAP_SORT in result.columns:
+        # More conditions met, then more that could be checked: a row that could
+        # only be checked once never outranks one that was checked three times.
+        result = result.sort_values(
+            ["cheap_met", "cheap_checkable", "market_cap"],
+            ascending=[not descending, not descending, False],
+            na_position="last",
+        )
+    elif sort in result.columns:
         result = result.assign(_sort=usable(result, sort)).sort_values("_sort", ascending=not descending, na_position="last")
     cols = [c for c in BASE_COLUMNS if c in result.columns] + [c for c in (columns or [m.key for m in METRICS]) if c in result.columns and c not in BASE_COLUMNS]
     page = result.iloc[offset : offset + limit][cols]
-    return {"total": int(len(result)), "rows": _records(page), "ready": True, "skipped": skipped}
+    met_counts = {int(k): int(v) for k, v in result["cheap_met"].value_counts().items()} if "cheap_met" in result else {}
+    return {"total": int(len(result)), "rows": _records(page), "ready": True, "skipped": skipped, "cheap_counts": met_counts}
 
 
 def distribution() -> dict[str, dict]:

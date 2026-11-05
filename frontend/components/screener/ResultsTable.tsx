@@ -12,6 +12,7 @@ import type { Metric, ScreenResult } from "@/lib/types";
 import { SIGNED } from "./conditions";
 
 export const PAGE_SIZE = 100;
+export const CHEAP_SORT = "cheap_met";
 
 /**
  * True when the table is wider than its box. Only then does the box scroll
@@ -80,6 +81,16 @@ export function ResultsTable({
             <th scope="col" className="left ticker-col">
               종목
             </th>
+            <th scope="col" aria-sort={sort === CHEAP_SORT ? (desc ? "descending" : "ascending") : undefined}>
+              <button
+                type="button"
+                className="sort-btn sort-btn--nowrap"
+                title="업종 대비, 자기 과거 대비, 현금 기준 중 충족한 조건 수 / 확인할 수 있는 조건 수예요. 점수가 아니에요."
+                onClick={() => onSort(CHEAP_SORT)}
+              >
+                싼 조건{sort === CHEAP_SORT ? (desc ? " ↓" : " ↑") : ""}
+              </button>
+            </th>
             <th scope="col" className="left">
               섹터
             </th>
@@ -129,6 +140,9 @@ export function ResultsTable({
                 </Link>
                 <span className="results__name">{r.name}</span>
                 {r.other_classes ? <span className="results__name">같은 회사 다른 주식: {r.other_classes}</span> : null}
+              </td>
+              <td className={sort === CHEAP_SORT ? "is-filtered" : undefined}>
+                {r.cheap_checkable ? `${r.cheap_met} / ${r.cheap_checkable}` : <span className="muted" title="확인할 수 있는 조건이 없어요">–</span>}
               </td>
               <td className="left muted">{sectorLabel.get(r.sector ?? "") ?? r.sector ?? "–"}</td>
               <td>{price(r.price as number | null)}</td>

@@ -2149,6 +2149,62 @@ textarea {
   scroll-margin-top: 3.75rem;
 }
 
+.start-cheap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.875rem;
+  margin: 0.875rem 0;
+  padding: 0.875rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.start-cheap p {
+  flex: 1 1 18rem;
+  margin: 0;
+}
+
+.cheap__rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.cheap__row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr) auto;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+}
+
+.cheap__row dt {
+  font-weight: 600;
+}
+
+.cheap__facts {
+  margin: 0;
+}
+
+.cheap__mark {
+  padding: 0.125rem 0.5rem;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.cheap__mark.is-met {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cheap__note {
+  margin: 0.875rem 0 0;
+}
+
 .metric-focus__head {
   display: flex;
   flex-wrap: wrap;
@@ -2183,4 +2239,69 @@ textarea {
   .stock-grid > [id] {
     scroll-margin-top: 7rem;
   }
+
+  .cheap__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .cheap__facts {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.sort-btn--nowrap {
+  white-space: nowrap;
+}
+
+/* Long tables scroll inside their panel instead of widening the page. */
+.stock-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.decline__table td:not(:first-child),
+.decline__table th:not(:first-child) {
+  white-space: nowrap;
+}
+
+#stock-decline .panel__head {
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+}
+
+.decline__facts {
+  margin: 0.75rem 0 0;
+  padding-left: 1.125rem;
+}
+
+.decline__trend {
+  margin-top: 1rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--line);
+}
+
+.decline__trend h3 {
+  font-size: 14px;
+  margin-bottom: 0.375rem;
+}
+
+.decline__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0;
+}
+
+.decline__stats div {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.decline__stats dt {
+  color: var(--muted);
+}
+
+.decline__stats dd {
+  margin: 0;
+  font-weight: 600;
 }

@@ -112,7 +112,7 @@ export type ScreenRow = {
   [metric: string]: string | number | null;
 };
 
-export type ScreenResult = { total: number; rows: ScreenRow[]; ready: boolean; skipped?: string[] };
+export type ScreenResult = { total: number; rows: ScreenRow[]; ready: boolean; skipped?: string[]; cheap_counts?: Record<string, number> };
 
 export type StockDetail = {
   symbol: string;
@@ -133,6 +133,52 @@ export type StockDetail = {
   sector_median: Record<string, number>;
   sector_percentile: Record<string, number>;
   peer_count: number;
+};
+
+export type CheapnessStatus = "met" | "unmet" | "na";
+
+export type SectorCondition = { key: "sector"; label: string; status: CheapnessStatus; reason: string | null; pe: number | null; percentile: number | null };
+export type OwnPastCondition = { key: "own_past"; label: string; status: CheapnessStatus; reason: string | null; current: number | null; median: number | null; since: string | null };
+export type CashCondition = {
+  key: "cash";
+  label: string;
+  status: CheapnessStatus;
+  reason: string | null;
+  price: number | null;
+  fcf_yield: number | null;
+  values: { low: number; base: number; high: number } | null;
+};
+
+export type Cheapness = {
+  in_snapshot: boolean;
+  built_at: string | null;
+  sector_label?: string | null;
+  sector_median_pe?: number | null;
+  assumptions?: { growth: { low: number; base: number; high: number }; discount: number; terminal: number; years: number };
+  conditions?: (SectorCondition | OwnPastCondition | CashCondition)[];
+  met?: number;
+  checkable?: number;
+};
+
+export type DeclineWindow = "1m" | "3m" | "6m" | "1y";
+export type Decline = {
+  as_of: string | null;
+  windows: Record<DeclineWindow, string>;
+  stock: Record<DeclineWindow, number | null>;
+  sector: Record<DeclineWindow, number | null>;
+  market: Record<DeclineWindow, number | null>;
+  etf: string | null;
+  sector_label: string | null;
+  return_facts: string[];
+  trend: {
+    quarter: string;
+    has_year_ago: boolean;
+    revenue_change: number | null;
+    operating_margin: number | null;
+    operating_margin_year_ago: number | null;
+    shares_change: number | null;
+  } | null;
+  earnings_facts: string[];
 };
 
 export type ValuationRange = {

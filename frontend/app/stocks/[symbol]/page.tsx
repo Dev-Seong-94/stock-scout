@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { useLayoutEffect, useRef, useState } from "react";
 
 import CandleChart from "@/components/CandleChart";
+import { CheapnessPanel } from "@/components/stock/CheapnessPanel";
+import { DeclinePanel } from "@/components/stock/DeclinePanel";
 import LineChart from "@/components/LineChart";
 import { Change, ErrorNote, InfoTip, RangeBar, Skeleton, Tabs } from "@/components/ui";
 import { useApi } from "@/lib/api";
@@ -604,6 +606,10 @@ export default function StockPage() {
   const compare = useCompare();
   const comparing = compare.has(symbol);
   const screenerUrl = useLastScreenerUrl();
+  const readFilings = () => {
+    setTab("filings");
+    document.getElementById("details-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <>
@@ -659,6 +665,8 @@ export default function StockPage() {
 
       <nav className="jump-nav" aria-label="이 페이지 안에서 이동">
         <a href="#stock-glance">한눈에 보기</a>
+        <a href="#stock-cheap">싼가?</a>
+        <a href="#stock-decline">왜 떨어졌나?</a>
         <a href="#stock-chart">주가</a>
         <a href="#stock-valuation">밸류에이션</a>
         <a href="#stock-metrics">지표</a>
@@ -679,12 +687,11 @@ export default function StockPage() {
           <AtAGlance
             detail={d}
             catalog={catalog.data}
-            onReadFilings={() => {
-              setTab("filings");
-              document.getElementById("details-tabs")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
+            onReadFilings={readFilings}
           />
         ) : null}
+        <CheapnessPanel symbol={symbol} />
+        <DeclinePanel symbol={symbol} onReadFilings={readFilings} />
         <PriceChart symbol={symbol} />
         <ValuationHistory symbol={symbol} />
         {d && catalog.data ? <MetricCards detail={d} catalog={catalog.data} /> : detail.loading ? <Skeleton height={300} /> : null}

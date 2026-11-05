@@ -9,7 +9,7 @@ import pytest
 from app import indicators as ind
 from app.metrics import METRICS, METRIC_KEYS, PRESETS, SECTOR_SUFFIX
 from app.regime import read_regime
-from app import filing_summary, screener
+from app import cheapness, decline, filing_summary, screener, snapshot
 from app.screener import apply_filters, with_sector_percentiles
 from app.snapshot import build_row, cash_runway_months, fcf_from_statement, financial_extras, fundamentals_from_info
 from app.valuation import valuation_ranges
@@ -393,3 +393,224 @@ def test_form_labels_use_longest_prefix():
     assert _label("424B5") == "증권 발행 설명서"
     assert _label("4/A") == "내부자 거래 보고"
     assert _label("S-3ASR") == "증권 발행 신고"
+
+
+def test_cash_value_multiples_and_values():
+    assert [round(cheapness.cash_value_multiple(g), 1) for g in (0.0, 0.05, 0.10)] == [11.4, 16.4, 23.7]
+    values = cheapness.cash_values(price=100, fcf_yield=5.0)
+    assert values["low"] < values["base"] < values["high"]
+    assert values["base"] == pytest.approx(100 * cheapness.cash_value_multiple(0.05) * 5 / 100, abs=0.01)
+    assert cheapness.cash_values(price=100, fcf_yield=-1.0) is None
+    assert cheapness.cash_values(price=None, fcf_yield=5.0) is None
+    # Price equals the base value at a yield of 100 / multiple.
+    assert cheapness.cash_value_gap(100 / cheapness.cash_value_multiple(0.05)) == pytest.approx(0, abs=1e-9)
+    assert cheapness.cash_value_gap(10.0) < 0 < cheapness.cash_value_gap(3.0)
+    assert cheapness.cash_value_gap(None) is None
+
+
+def _cheap_row(**over) -> dict:
+    row = {
+        "sector": "Technology", "price": 100.0, "pe": 14.0, "pe@sector": 18.0,
+        "pe_own_current": 14.0, "pe_own_median": 19.0, "pe_own_since": "2022-01-01", "fcf_yield": 8.0,
+    }
+    return row | over
+
+
+def _by_key(row: dict) -> dict:
+    return {c["key"]: c for c in cheapness.evaluate(row)["conditions"]}
+
+
+def test_cheapness_counts_met_and_checkable():
+    result = cheapness.evaluate(_cheap_row())
+    assert (result["met"], result["checkable"]) == (3, 3)
+    assert [c["key"] for c in result["conditions"]] == ["sector", "own_past", "cash"]
+    result = cheapness.evaluate(_cheap_row(**{"pe@sector": 41.0, "pe_own_current": 20.0, "fcf_yield": 3.0}))
+    assert (result["met"], result["checkable"]) == (0, 3)
+    assert all(c["status"] == "unmet" and c["reason"] is None for c in result["conditions"])
+    assert _by_key(_cheap_row(**{"pe@sector": 40.0}))["sector"]["status"] == "met"
+
+
+@pytest.mark.parametrize(
+    ("over", "key", "phrase"),
+    [
+        ({"pe": -3.0}, "sector", "적자"),
+        ({"pe": None}, "sector", "적자"),
+        ({"sector": "Real Estate"}, "sector", "리츠"),
+        ({"pe@sector": None}, "sector", "5개"),
+        ({"pe_own_current": None}, "own_past", "적자"),
+        ({"pe_own_current": None, "pe_own_median": None}, "own_past", "과거"),
+        ({"fcf_yield": -2.0}, "cash", "음수"),
+        ({"fcf_yield": None}, "cash", "없어요"),
+        ({"sector": "Financial Services", "fcf_yield": 8.0}, "cash", "금융"),
+    ],
+)
+def test_cheapness_says_why_it_cannot_check(over, key, phrase):
+    condition = _by_key(_cheap_row(**over))[key]
+    assert condition["status"] == "na"
+    assert phrase in condition["reason"]
+
+
+def test_cheapness_with_an_older_snapshot_asks_for_a_rebuild():
+    row = _cheap_row()
+    for key in ("pe_own_current", "pe_own_median", "pe_own_since"):
+        del row[key]
+    result = cheapness.evaluate(row)
+    assert (result["met"], result["checkable"]) == (2, 2)
+    assert "다시 만들" in _by_key(row)["own_past"]["reason"]
+
+
+def test_cheapness_treats_nan_as_missing():
+    assert _by_key(_cheap_row(fcf_yield=float("nan")))["cash"]["status"] == "na"
+
+
+def _two_lengths() -> tuple[pd.DataFrame, pd.DataFrame]:
+    days = pd.bdate_range(end="2026-11-03", periods=1300)
+    rng = np.random.default_rng(1)
+    close = pd.Series(100 + rng.normal(0, 1, len(days)).cumsum(), index=days).clip(lower=5)
+    # The highest close is older than two years, where it must not count.
+    close.iloc[100] = 900
+    frame = pd.DataFrame({"Close": close, "Volume": 1_000_000.0})
+    return frame, frame[frame.index >= days[-1] - pd.Timedelta(days=730)]
+
+
+def test_price_metrics_do_not_change_with_more_history():
+    five, two = _two_lengths()
+    assert ind.price_indicators(snapshot.recent_prices(five)) == ind.price_indicators(snapshot.recent_prices(two))
+
+
+def _annual_income() -> pd.DataFrame:
+    years = pd.to_datetime(["2025-12-31", "2024-12-31", "2023-12-31", "2022-12-31"])
+    return pd.DataFrame({y: [e] for y, e in zip(years, (10.0, 8.0, 6.0, 5.0))}, index=["Diluted EPS"])
+
+
+def test_own_past_pe_uses_weekly_prices_and_any_timezone():
+    five, _ = _two_lengths()
+    naive = snapshot.own_past_pe(five, _annual_income())
+    assert naive["pe_own_current"] == pytest.approx(five["Close"].iloc[-1] / 10, rel=0.05)
+    assert naive["pe_own_median"] is not None and naive["pe_own_since"][:2] == "20"
+    aware = five.copy()
+    aware.index = aware.index.tz_localize("America/New_York")
+    assert snapshot.own_past_pe(aware, _annual_income()) == naive
+    assert snapshot.own_past_pe(five, pd.DataFrame())["pe_own_median"] is None
+    assert snapshot.own_past_pe(pd.DataFrame(), _annual_income())["pe_own_median"] is None
+
+
+def test_build_row_has_cheapness_inputs():
+    five, _ = _two_lengths()
+    row = build_row("X", five, {"freeCashflow": 5e9, "marketCap": 100e9}, _annual_income())
+    assert row["cash_value_gap"] == pytest.approx(cheapness.cash_value_gap(5.0))
+    assert row["pe_vs_own"] == pytest.approx(cheapness.pe_vs_own(row["pe_own_current"], row["pe_own_median"]))
+    assert cheapness.evaluate(row)["checkable"] >= 2
+
+
+def test_cheapness_endpoint_shape(monkeypatch):
+    from app.routers import stocks
+
+    monkeypatch.setattr(screener, "row", lambda s: _cheap_row(symbol=s) if s == "AAA" else None)
+    monkeypatch.setattr(screener, "sector_peers", lambda sector: pd.DataFrame({"pe": [10.0, 20.0, 30.0, 40.0, -5.0, 50.0]}))
+    monkeypatch.setattr(stocks, "load_meta", lambda: {"built_at": "2026-11-05T00:00:00+00:00"})
+    out = stocks.cheapness_conditions("AAA")
+    assert out["sector_median_pe"] == 30.0  # the loss-making -5 is left out
+    assert (out["met"], out["checkable"]) == (3, 3) and out["in_snapshot"] is True
+    assert stocks.cheapness_conditions("ZZZ") == {"in_snapshot": False, "built_at": "2026-11-05T00:00:00+00:00"}
+
+
+def _cheap_frame() -> pd.DataFrame:
+    # AAA meets all three; BBB is loss-making, so only its cash condition can be checked.
+    base = {"sector": "Technology", "price": 100.0, "pe_own_since": "2022-01-01"}
+    rows = [
+        {"symbol": "AAA", "pe": 10.0, "pe_own_current": 10.0, "pe_own_median": 20.0, "fcf_yield": 9.0, "market_cap": 1.0},
+        {"symbol": "BBB", "pe": -1.0, "pe_own_current": None, "pe_own_median": None, "fcf_yield": 9.0, "market_cap": 900.0},
+        {"symbol": "CCC", "pe": 90.0, "pe_own_current": 30.0, "pe_own_median": 20.0, "fcf_yield": 9.0, "market_cap": 2.0},
+        {"symbol": "DDD", "pe": 95.0, "pe_own_current": 30.0, "pe_own_median": 20.0, "fcf_yield": 9.0, "market_cap": 3.0},
+        {"symbol": "EEE", "pe": 99.0, "pe_own_current": 30.0, "pe_own_median": 20.0, "fcf_yield": 1.0, "market_cap": 4.0},
+    ]
+    rows += [{"symbol": f"P{i}", "pe": 50.0 + i, "pe_own_current": 30.0, "pe_own_median": 20.0, "fcf_yield": 1.0, "market_cap": 0.5} for i in range(5)]
+    return pd.DataFrame([base | r | {"name": r["symbol"]} for r in rows])
+
+
+@pytest.fixture
+def cheap_screener(monkeypatch):
+    df = _cheap_frame()
+    screener.set_frame(df)
+    monkeypatch.setattr(screener, "frame", lambda: screener._frame)
+    yield screener
+    screener.set_frame(None)
+
+
+def test_screener_sort_by_conditions_met(cheap_screener):
+    out = cheap_screener.run(sort="cheap_met", limit=6)
+    # DDD, CCC, P0 and P1 meet one of three; BBB's one of one comes after them.
+    assert [r["symbol"] for r in out["rows"]] == ["AAA", "DDD", "CCC", "P0", "P1", "BBB"]
+    assert (out["rows"][0]["cheap_met"], out["rows"][0]["cheap_checkable"]) == (3, 3)
+    assert (out["rows"][5]["cheap_met"], out["rows"][5]["cheap_checkable"]) == (1, 1)
+    assert out["cheap_counts"][3] == 1 and out["cheap_counts"][1] == 5
+
+
+def test_screener_count_matches_the_stock_page(cheap_screener):
+    for symbol in ("AAA", "BBB", "CCC", "EEE"):
+        row = cheap_screener.row(symbol)
+        result = cheapness.evaluate(row)
+        assert (row["cheap_met"], row["cheap_checkable"]) == (result["met"], result["checkable"])
+
+
+BANNED_WORDS = ("문제없", "문제가 없", "시장 탓", "회사 탓", "때문", "싸다", "싸요", "저평가", "매수", "매도", "추천", "목표가")
+
+
+def test_decline_returns_use_each_window():
+    close = prices(np.linspace(200, 100, 300))
+    out = decline.returns(close)
+    assert out["1m"] == pytest.approx((close.iloc[-1] / close.iloc[-22] - 1) * 100)
+    assert set(out) == {"1m", "3m", "6m", "1y"}
+    assert decline.returns(None)["3m"] is None
+    assert decline.returns(prices(np.linspace(10, 9, 30)))["3m"] is None
+
+
+def test_decline_sentences_compare_without_naming_a_cause():
+    stock = {"1m": -8.0, "3m": -25.0, "6m": -30.0, "1y": -35.0}
+    lines = decline.return_facts(stock, {"3m": -18.0}, {"3m": -9.0}, "정보기술")
+    assert lines == ["3개월 동안 25% 떨어졌어요.", "정보기술보다 7%p 더 떨어졌어요.", "S&P 500보다 16%p 더 떨어졌어요."]
+    # About the same, a smaller fall, and a market that rose.
+    assert "정보기술 수익률과 비슷해요." in decline.return_facts({"3m": -10.0}, {"3m": -9.0}, {"3m": 1.0}, "정보기술")
+    assert "섹터보다 5%p 덜 떨어졌어요." in decline.return_facts({"3m": -10.0}, {"3m": -15.0}, {}, "섹터")
+    assert "같은 기간 S&P 500 수익률은 +4.0%예요." in decline.return_facts({"3m": -10.0}, {}, {"3m": 4.0})
+    # Three months up: talk about the window where it did fall.
+    assert decline.return_facts({"3m": 5.0, "1y": -20.0}, {}, {})[0] == "1년 동안 20% 떨어졌어요."
+    assert decline.return_facts({"1m": 1.0, "3m": 5.0, "6m": 2.0, "1y": 9.0}, {}, {}) == ["이 기간에는 떨어지지 않았어요."]
+    assert decline.return_facts(dict.fromkeys(("1m", "3m")), {}, {}) == []
+    for line in lines:
+        assert not any(word in line for word in BANNED_WORDS)
+
+
+def _quarters(revenue, operating, shares, ends=("2026-06-30", "2026-03-31", "2025-12-31", "2025-09-30", "2025-06-30")) -> pd.DataFrame:
+    return pd.DataFrame(
+        [revenue, operating, shares],
+        index=["Total Revenue", "Operating Income", "Diluted Average Shares"],
+        columns=pd.to_datetime(list(ends)),
+    )
+
+
+def test_quarterly_trend_compares_with_the_same_quarter_a_year_ago():
+    income = _quarters([90, 80, 80, 80, 100], [9, 8, 8, 8, 20], [110, 100, 100, 100, 100])
+    trend = decline.quarterly_trend(income)
+    assert trend["quarter"] == "2026-06-30" and trend["has_year_ago"] is True
+    assert trend["revenue_change"] == pytest.approx(-10)
+    assert (trend["operating_margin"], trend["operating_margin_year_ago"]) == (pytest.approx(10), pytest.approx(20))
+    assert trend["shares_change"] == pytest.approx(10)
+    lines = decline.earnings_facts(trend)
+    assert lines == ["매출이 전년 같은 분기보다 10% 줄었어요.", "영업이익률이 전년 같은 분기보다 10%p 낮아졌어요.", "희석 주식 수가 전년 같은 분기보다 10% 늘었어요."]
+    for line in lines:
+        assert not any(word in line for word in BANNED_WORDS)
+
+
+def test_quarterly_trend_handles_gaps_and_good_results():
+    # Results that held up produce numbers but no sentence.
+    good = decline.quarterly_trend(_quarters([120, 1, 1, 1, 100], [24, 1, 1, 1, 20], [100, 1, 1, 1, 100]))
+    assert decline.earnings_facts(good) == []
+    # Only two recent quarters: no year-ago figures, and no crash.
+    short = decline.quarterly_trend(_quarters([90, 80], [9, 8], [10, 10], ends=("2026-06-30", "2026-03-31")))
+    assert short["has_year_ago"] is False and short["revenue_change"] is None and short["operating_margin"] == pytest.approx(10)
+    assert decline.earnings_facts(short) == []
+    assert decline.earnings_facts({"revenue_change": -0.4}) == []  # not "fell 0%"
+    assert decline.quarterly_trend(pd.DataFrame()) is None
+    assert decline.earnings_facts(None) == []

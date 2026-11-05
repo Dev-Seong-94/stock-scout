@@ -19,10 +19,15 @@ from typing import Callable
 
 import pandas as pd
 
+from app.cheapness import NO_FCF_SECTORS, cash_value_gap, pe_vs_own
 from app.config import settings
 from app.indicators import _clean, cagr, price_indicators
+from app.valuation import valuation_ranges
 
 log = logging.getLogger(__name__)
+
+PRICE_METRIC_DAYS = 731
+HISTORY_PERIOD = "5y"  # own-past PER needs years of prices; price metrics use only the last two
 
 SNAPSHOT = settings.data_dir / "snapshot.parquet"
 META = settings.data_dir / "snapshot_meta.json"
@@ -34,10 +39,6 @@ def _pct(value) -> float | None:
     v = _clean(value)
     return None if v is None else v * 100
 
-
-# Banks' and insurers' operating cash flow includes lending and deposits, so
-# "free cash flow" says nothing about them; FCF yield and runway are left empty.
-NO_FCF_SECTORS = {"Financial Services"}
 
 
 def fcf_from_statement(cashflow: pd.DataFrame | None) -> float | None:
@@ -158,6 +159,24 @@ def financial_extras(income: pd.DataFrame) -> dict:
     return out
 
 
+def recent_prices(history: pd.DataFrame) -> pd.DataFrame:
+    """The last two years: price metrics stay the same however much history was loaded."""
+    return history[history.index >= history.index.max() - pd.Timedelta(days=PRICE_METRIC_DAYS)]
+
+
+def own_past_pe(history: pd.DataFrame | None, income: pd.DataFrame | None) -> dict:
+    """Last fiscal year's PER and its median over the available history (annual figures, weekly prices)."""
+    empty = {"pe_own_current": None, "pe_own_median": None, "pe_own_since": None}
+    if history is None or history.empty or income is None or income.empty:
+        return empty
+    close = history["Close"].dropna()
+    close.index = pd.DatetimeIndex(close.index).tz_localize(None)
+    pe = valuation_ranges(close.resample("W-FRI").last().dropna(), income)["pe"]
+    if pe is None:
+        return empty
+    return {"pe_own_current": pe["current"], "pe_own_median": pe["median"], "pe_own_since": pe["since"]}
+
+
 def build_row(
     symbol: str,
     history: pd.DataFrame,
@@ -167,8 +186,11 @@ def build_row(
 ) -> dict:
     row = {"symbol": symbol}
     row |= fundamentals_from_info(info, fcf_from_statement(cashflow))
-    row |= price_indicators(history) if history is not None and not history.empty else {}
+    row |= price_indicators(recent_prices(history)) if history is not None and not history.empty else {}
     row |= financial_extras(income if income is not None else pd.DataFrame())
+    row |= own_past_pe(history, income)
+    row["pe_vs_own"] = pe_vs_own(row["pe_own_current"], row["pe_own_median"])
+    row["cash_value_gap"] = cash_value_gap(row.get("fcf_yield"))
     if row.get("price") is None and history is not None and not history.empty:
         row["price"] = _clean(history["Close"].dropna().iloc[-1])
     return row
@@ -190,7 +212,7 @@ def _download_histories(symbols: list[str], chunk: int = 100) -> dict[str, pd.Da
         part = symbols[i : i + chunk]
         try:
             # threads=False: parallel downloads open many sockets at once and get rate limited.
-            df = yf.download(part, period="2y", auto_adjust=True, progress=False, group_by="ticker", threads=False)
+            df = yf.download(part, period=HISTORY_PERIOD, auto_adjust=True, progress=False, group_by="ticker", threads=False)
         except Exception as exc:
             log.warning("bulk price download failed for %s…: %s", part[0], exc)
             continue
@@ -215,7 +237,7 @@ def _download_histories(symbols: list[str], chunk: int = 100) -> dict[str, pd.Da
 
 def _single_history(ticker) -> pd.DataFrame:
     """Fallback when a ticker was missing from the bulk download."""
-    df = ticker.history(period="2y", auto_adjust=True)
+    df = ticker.history(period=HISTORY_PERIOD, auto_adjust=True)
     if df is None or df.empty:
         return pd.DataFrame()
     df.index = pd.to_datetime(df.index).tz_localize(None)

@@ -93,6 +93,20 @@ METRICS: list[Metric] = [
         -10, 20, 0.5,
     ),
     Metric(
+        "pe_vs_own", "자기 과거 대비 PER", "valuation", "%",
+        "직전 회계연도 실적 기준 PER이 이 회사의 과거 중앙값(약 4년)보다 몇 % 높거나 낮은지.",
+        "0보다 낮으면 자기 평소 수준보다 낮게 거래되고 있어요. 다른 회사와 견주지 않고 그 회사 안에서만 비교해요.",
+        "이익 전망이 나빠져서 낮아진 경우가 많아요. 연간 실적 기준이라 최근 12개월 PER과 숫자가 달라요. 적자 해가 많으면 값이 없어요.",
+        -80, 100, 5,
+    ),
+    Metric(
+        "cash_value_gap", "현금 기준 계산값 대비", "valuation", "%",
+        "주가가 현금 기준 계산값(FCF가 10년간 연 5% 자라고, 할인율 10%, 이후 연 2.5% 성장을 가정)보다 몇 % 높거나 낮은지.",
+        "0보다 낮으면 주가가 계산값보다 낮아요. 같은 가정을 모든 회사에 적용해서, 빠르게 크는 회사는 높게 나오기 쉬워요.",
+        "목표가가 아니에요. 가정을 바꾸면 결과가 크게 달라져요. 최근 1년 FCF가 평소와 다른 회사(경기민감주, 큰 투자를 한 해)는 왜곡돼요. FCF가 음수이거나 금융사면 값이 없어요.",
+        -80, 300, 5,
+    ),
+    Metric(
         "dividend_yield", "배당수익률", "valuation", "%",
         "연간 주당 배당금 ÷ 주가.",
         "현금 수익을 원할 때 보는 지표예요.",
@@ -287,7 +301,7 @@ _PREFER_HIGH = {
     "revenue_growth", "earnings_growth", "revenue_cagr_3y",
     "current_ratio", "interest_coverage", "cash_runway", "gross_margin_change",
 }
-_PREFER_LOW = {"pe", "forward_pe", "peg", "pb", "ps", "ev_ebitda", "debt_to_equity", "share_change_1y"}
+_PREFER_LOW = {"pe", "forward_pe", "peg", "pb", "ps", "ev_ebitda", "pe_vs_own", "cash_value_gap", "debt_to_equity", "share_change_1y"}
 METRICS = [replace(m, prefer="high" if m.key in _PREFER_HIGH else "low" if m.key in _PREFER_LOW else "") for m in METRICS]
 
 METRIC_KEYS = {m.key for m in METRICS}

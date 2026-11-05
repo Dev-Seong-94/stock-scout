@@ -187,6 +187,16 @@ def annual_income(symbol: str) -> pd.DataFrame:
 
 
 @ttl_cache(seconds=6 * 60 * 60)
+def quarterly_income(symbol: str) -> pd.DataFrame:
+    """Quarterly income statement, rows = line items, columns = quarter ends."""
+    try:
+        df = yf.Ticker(symbol).quarterly_income_stmt
+        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
+@ttl_cache(seconds=6 * 60 * 60)
 def ttm_cashflow(symbol: str) -> pd.DataFrame:
     """Trailing-twelve-month cash flow statement (one column)."""
     try:

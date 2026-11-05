@@ -5,12 +5,12 @@ import re
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
-from app import filing_summary, screener
+from app import cheapness, decline, filing_summary, screener
 from app.indicators import _clean, performance_since
 from app.industries import industry_ko
 from app.metrics import METRICS, SECTORS
 from app.services import market, news, sec
-from app.snapshot import build_row
+from app.snapshot import HISTORY_PERIOD, build_row, load_meta
 from app.valuation import valuation_ranges
 
 router = APIRouter(prefix="/api", tags=["stocks"])
@@ -30,7 +30,7 @@ def _check(symbol: str) -> str:
 def detail(symbol: str) -> dict:
     symbol = _check(symbol)
     info = market.info(symbol)
-    hist = market.history(symbol, period="2y")
+    hist = market.history(symbol, period=HISTORY_PERIOD)
     if not info and hist.empty:
         raise HTTPException(404, f"{symbol} 데이터를 찾지 못했어요.")
 
@@ -103,6 +103,63 @@ def history(symbol: str, range: str = Query("1y")) -> dict:
         "sma_fast": pts(sma20),
         "sma_labels": ["50일선", "200일선"] if interval == "1d" else ["50주선", "40주선(≈200일)"],
         "sma_fast_label": "20일선" if interval == "1d" else "20주선",
+    }
+
+
+@router.get("/stocks/{symbol}/cheapness")
+def cheapness_conditions(symbol: str) -> dict:
+    """The three "is it cheap?" conditions, from the same snapshot the screener counts."""
+    symbol = _check(symbol)
+    meta = load_meta() or {}
+    row = screener.row(symbol)
+    if row is None:
+        return {"in_snapshot": False, "built_at": meta.get("built_at")}
+    peers = screener.sector_peers(row.get("sector"))
+    median = None
+    if peers is not None and "pe" in peers:
+        pe = screener.usable(peers, "pe").dropna()
+        median = round(float(pe.median()), 2) if len(pe) >= screener.MIN_PEERS else None
+    return {
+        "in_snapshot": True,
+        "built_at": meta.get("built_at"),
+        "sector_label": SECTORS.get(row.get("sector") or "", row.get("sector")),
+        "sector_median_pe": median,
+        "assumptions": {
+            "growth": cheapness.SCENARIOS,
+            "discount": cheapness.DISCOUNT,
+            "terminal": cheapness.TERMINAL_GROWTH,
+            "years": cheapness.YEARS,
+        },
+        **cheapness.evaluate(row),
+    }
+
+
+@router.get("/stocks/{symbol}/decline")
+def decline_comparison(symbol: str) -> dict:
+    """The stock's returns next to its sector ETF and the S&P 500, plus the latest quarter."""
+    symbol = _check(symbol)
+    row = screener.row(symbol) or {}
+    sector = row.get("sector") or market.info(symbol).get("sector")
+    etf = next((e for e, s in market.SECTOR_ETFS.items() if s == sector), None)
+    close = market.closes(tuple(dict.fromkeys(s for s in (symbol, etf, "SPY") if s)), period="2y")
+
+    def series(name: str | None) -> dict:
+        return decline.returns(close[name] if name and name in close else None)
+
+    stock, sector_returns, spy = series(symbol), series(etf), series("SPY")
+    sector_label = SECTORS.get(sector or "", sector)
+    trend = decline.quarterly_trend(market.quarterly_income(symbol))
+    return {
+        "as_of": close.index[-1].strftime("%Y-%m-%d") if not close.empty else None,
+        "windows": decline.WINDOW_LABELS,
+        "stock": stock,
+        "sector": sector_returns,
+        "market": spy,
+        "etf": etf,
+        "sector_label": sector_label,
+        "return_facts": decline.return_facts(stock, sector_returns, spy, sector_label),
+        "trend": trend,
+        "earnings_facts": decline.earnings_facts(trend),
     }
 
 
